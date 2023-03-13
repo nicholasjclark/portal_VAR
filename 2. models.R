@@ -3,7 +3,6 @@ library(cmdstanr)
 library(forecast)
 #remotes::install_github('nicholasjclark/mvgam')
 library(mvgam)
-setwd("C:/Users/Nick/Google Drive/Academic Work Folder/Ecological forecasting/mv_portalcasting/rodent_evaluation_ms")
 source('Functions/checking_functions.R')
 
 # Load the pre-prepared modelling data
@@ -12,7 +11,6 @@ load('data/rodents_data_tsobjects.rda')
 # View some of the raw time series
 plot_mvgam_series(data = data_train, series = 'all')
 plot_mvgam_series(data = data_train, newdata = data_test, series = 8)
-
 
 #### Building up the GAM-VAR model ####
 # Prior simulation for a baseline version of the GAM-VAR model
@@ -210,4 +208,3 @@ bench2 <- mvgam(formula = y ~ 1,
                 use_stan = TRUE,
                 priors = priors)
 save(bench2, file = 'Outputs/bench2.rda')
-
