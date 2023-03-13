@@ -1,7 +1,6 @@
 #### Analyse candidate models and produce model-based visualisations ####
 library(mvgam)
 library(scoringRules)
-setwd("C:/Users/Nick/Google Drive/Academic Work Folder/Ecological forecasting/mv_portalcasting/rodent_evaluation_ms")
 source('Functions/checking_functions.R')
 
 # Load all relevant models
