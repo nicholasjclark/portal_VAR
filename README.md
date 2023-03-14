@@ -9,7 +9,7 @@ This repository contains R code to extract data and replicate analyses in the ma
 `forecast`  
 `cmdstanr` (and `Cmdstan`)  
 [`mvgam`](https://github.com/nicholasjclark/mvgam)  
-`scoringRules`
+`scoringRules`  
 `extraDistr`  
 `nleqslv`
 
