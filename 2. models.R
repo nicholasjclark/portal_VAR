@@ -48,11 +48,12 @@ dir.create('Outputs', showWarnings = FALSE, recursive = TRUE)
 save(mod1, file = 'Outputs/mod1.rda')
 
 # Model 1 fits without issue. We expect some consistent seasonality in captures for the dominant species, so
-# distributed lags of minimum temperature make sense. This can be accomplished in mgcv/mvgam
-# by using the weights argument in the tensor product smooth. Each species' deviation smooth
-# is specified by using a `1` when the observation was for that species and a `0` otherwise.
-# But we need to ensure the computation is sound for this more complex model before adding 
-# any dynamic trend components
+# distributed lags of minimum temperature make sense. A hierarchical distributed lag model can be accomplished 
+# in mgcv/mvgam by fitting a 'global' function that estimates the community-level function, and then
+# by using the weights argument in the tensor product smooth for species-level 'deviation' functions. 
+# Each species' deviation smooth is specified by using a `1` when the observation was for that species 
+# and a `0` otherwise. But we need to ensure the computation is sound for this more complex model before 
+# adding any dynamic trend components
 mod2 <- mvgam(formula = y ~ 
                 s(series, bs = 're') +
                 s(ndvi_ma12, series, bs = 're') +
@@ -123,7 +124,8 @@ exp(opt$x)
 # objects for conditioning the GAM-VAR model. It will be challenging to estimate 
 # species-level hierarchical intercepts while also estimating the VAR(1) process, because the 
 # latent trend can compete with the 'average' capture parameter. So we drop the hierarchical
-# intercepts in this model
+# intercepts in this model. We specify an AR1 trend model just to ensure downstream mvgam 
+# functions know that there is a latent trend involved in the model.
 modvar_skeleton <- mvgam(formula = y ~ 
                            s(ndvi_ma12, series, bs = 're') +
                            te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
@@ -223,7 +225,9 @@ bench1 <- mvgam(formula = y ~
          family = 'nb',
          priors = priors,
          trend_model = 'AR1',
-         use_stan = TRUE)
+         use_stan = TRUE,
+         burnin = 500,
+         samples = 500)
 save(bench1, file = 'Outputs/bench1.rda')
 
 # Now a simpler benchmark with no GAM linear predictor;
@@ -243,6 +247,8 @@ bench2 <- mvgam(formula = y ~ 1,
                 family = 'nb',
                 trend_model = 'AR1',
                 use_stan = TRUE,
-                priors = priors)
+                priors = priors,
+                burnin = 500,
+                samples = 500)
 save(bench2, file = 'Outputs/bench2.rda')
 
