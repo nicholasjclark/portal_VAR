@@ -3,7 +3,6 @@ library(cmdstanr)
 library(forecast)
 #remotes::install_github('nicholasjclark/mvgam')
 library(mvgam)
-setwd("C:/Users/Nick/Google Drive/Academic Work Folder/Ecological forecasting/mv_portalcasting/rodent_evaluation_ms")
 source('Functions/checking_functions.R')
 
 # Load the pre-prepared modelling data
@@ -31,7 +30,6 @@ mod1_prior <- mvgam(formula = y ~
 plot(mod1_prior, 're')
 
 # These are reasonable given the expected number of captures per session
-
 # Satisfied with our prior model, let's now condition on the observed data
 mod1 <- mvgam(formula = y ~ 
                 s(series, bs = 're') +
@@ -49,14 +47,18 @@ summary(mod1)
 dir.create('Outputs', showWarnings = FALSE, recursive = TRUE)
 save(mod1, file = 'Outputs/mod1.rda')
 
-# We expect some consistent seasonality in captures for the dominant species, so
-# distributed lags of minimum temperature make sense. But we need to ensure the 
-# computation is sound for this more complex model before adding any dynamic trend
-# components
+# Model 1 fits without issue. We expect some consistent seasonality in captures for the dominant species, so
+# distributed lags of minimum temperature make sense. This can be accomplished in mgcv/mvgam
+# by using the weights argument in the tensor product smooth. Each species' deviation smooth
+# is specified by using a `1` when the observation was for that species and a `0` otherwise.
+# But we need to ensure the computation is sound for this more complex model before adding 
+# any dynamic trend components
 mod2 <- mvgam(formula = y ~ 
                 s(series, bs = 're') +
                 s(ndvi_ma12, series, bs = 're') +
+                # 'Global' minimum temperature distributed lag function
                 te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
+                # Species-level 'deviation' distributed lag functions
                 te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
                 te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
                 te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
