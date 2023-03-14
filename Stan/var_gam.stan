@@ -1,4 +1,4 @@
-// Stan model code for a Negative Binomial VAR(1)
+// Stan model code for a Negative Binomial GAM with latent VAR(1) dynamic process
 functions {
   vector rep_each(vector x, int K) {
   int N = rows(x);
@@ -66,9 +66,9 @@ transformed parameters {
     trend[i, 1:n_series] = to_row_vector(trend_raw[i]);
   }
   
-  // rescaled z-score random slope estimates
+  // rescaled z-score random NDVI slope estimates
   b[1:9] = mu_raw[1] + b_raw[1:9] * sigma_raw[1];
-  // remaining GAM beta coefficients
+  // remaining GAM beta coefficients are unchanged from the model block
   b[10:num_basis] = b_raw[10:num_basis];
 }
 
@@ -90,9 +90,9 @@ model {
   }
 
   // GAM component priors //
-  // containment prior for random effect population variance
+  // containment prior for random NDVI slope population SD
   sigma_raw ~ inv_gamma(2.3693353, 0.7311319);
-  // prior for random effect population mean
+  // prior for random NDVI slope mean
   mu_raw ~ std_normal();
   // prior (non-centred) for s(ndvi_ma12,series)...
   b_raw[1:9] ~ std_normal();
