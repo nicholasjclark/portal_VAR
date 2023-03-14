@@ -17,7 +17,7 @@ plot_mvgam_series(data = data_train, newdata = data_test, series = 8)
 #### Building up the GAM-VAR model ####
 # Prior simulation for a baseline version of the GAM-VAR model
 mod1_prior <- mvgam(formula = y ~ 
-                      # Series-level hierarchical intercepts
+                      # Species-level hierarchical intercepts
                       s(series, bs = 're') +
                       # Species-level hierarchical slopes of NDVI
                       s(ndvi_ma12, series, bs = 're') - 1,
@@ -118,7 +118,10 @@ opt <- nleqslv::nleqslv(
 exp(opt$x)
 
 # With prior distributions derived, we can construct the necessary data 
-# objects for conditioning the GAM-VAR model
+# objects for conditioning the GAM-VAR model. It will be challenging to estimate 
+# species-level hierarchical intercepts while also estimating the VAR(1) process, because the 
+# latent trend can compete with the 'average' capture parameter. So we drop the hierarchical
+# intercepts in this model
 modvar_skeleton <- mvgam(formula = y ~ 
                            s(ndvi_ma12, series, bs = 're') +
                            te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
