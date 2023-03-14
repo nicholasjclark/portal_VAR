@@ -3,6 +3,7 @@ library(cmdstanr)
 library(forecast)
 #remotes::install_github('nicholasjclark/mvgam')
 library(mvgam)
+setwd("C:/Users/Nick/Google Drive/Academic Work Folder/Ecological forecasting/mv_portalcasting/rodent_evaluation_ms")
 source('Functions/checking_functions.R')
 
 # Load the pre-prepared modelling data
@@ -11,6 +12,7 @@ load('data/rodents_data_tsobjects.rda')
 # View some of the raw time series
 plot_mvgam_series(data = data_train, series = 'all')
 plot_mvgam_series(data = data_train, newdata = data_test, series = 8)
+
 
 #### Building up the GAM-VAR model ####
 # Prior simulation for a baseline version of the GAM-VAR model
@@ -30,7 +32,6 @@ plot(mod1_prior, 're')
 
 # These are reasonable given the expected number of captures per session
 
-# Prior realisations now indicate more reasonable behaviour
 # Satisfied with our prior model, let's now condition on the observed data
 mod1 <- mvgam(formula = y ~ 
                 s(series, bs = 're') +
@@ -48,7 +49,7 @@ summary(mod1)
 dir.create('Outputs', showWarnings = FALSE, recursive = TRUE)
 save(mod1, file = 'Outputs/mod1.rda')
 
-# We expect some consistent seasonality  in captures for the dominant species, so
+# We expect some consistent seasonality in captures for the dominant species, so
 # distributed lags of minimum temperature make sense. But we need to ensure the 
 # computation is sound for this more complex model before adding any dynamic trend
 # components
@@ -66,17 +67,19 @@ mod2 <- mvgam(formula = y ~
               trend_model = 'None',
               use_stan = TRUE)
 
-# Ensure the MCMC estimator is adequately exploring  the joint 
+# Ensure the MCMC estimator is adequately exploring the joint 
 # posterior without any obvious hindrances
 summary(mod2)
 save(mod2, file = 'Outputs/mod2.rda')
 
 
-# We expect complex relationships among latent trends, but how 
-# can these be captured in a principled way? A latent VAR(1) dynamic process
+# Model 2 fits without issue and indicates there is evidence for seasonality in captures
+# for most species. Now for model expansion: we expect complex relationships among latent trends, but how 
+# can these be captured in a principled way? A latent VAR(1) dynamic process is one option
 
 # First we need to use suitable containment priors for some key parameters; most notably
-# the overdispersion parameters for the Negative Binomial sampling distribution
+# the overdispersion parameters for the Negative Binomial sampling distribution. This code
+# is modified from relevant code in the brms R package: https://github.com/paul-buerkner/brms
 invgamma_opt_fun <- function(x, lowerbound, upperbound,
                              plower, pupper){
   x <- exp(x)
@@ -131,12 +134,14 @@ modvar_skeleton <- mvgam(formula = y ~
                          run_model = FALSE)
 model_data <- modvar_skeleton$model_data
 
+# The model file has already been created externally (saved in the Stan directory). This 
+# was necessary becase mvgam does not yet automatically create models with latent VAR processes.
 # Compile the model into C++ code using Cmdstanr routines
 cmd_mod <- cmdstan_model('Stan/var_gam.stan',
                          stanc_options = list('O1',
                                               'canonicalize=deprecations,braces,parentheses'))
 
-# Condition the model; takes ~ 2 hours to sample on a 
+# Condition the model; takes ~ 1.5 hours to sample on a 
 # Intel(R) Core(TM) i5-8500 CPU @ 3.00GHz with 32GB RAM
 fit <- cmd_mod$sample(data = model_data,
                       chains = 4,
@@ -187,7 +192,34 @@ summary(modvar)
 #### Fit Benchmark models ####
 # Same GAM linear predictor as GAM-VAR model, but with independent AR1 trends
 # (in-text referred to as GAM-AR)
-
+priors <- get_mvgam_priors(formula = y ~ 
+                             s(ndvi_ma12, series, bs = 're') +
+                             te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
+                             te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
+                             te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
+                             te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
+                             te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')) - 1,
+                           data = data_train,
+                           family = 'nb',
+                           trend_model = 'AR1',
+                           use_stan = TRUE)
+priors$prior[1] <- 'ar1 ~ normal(0.5, 0.25);'
+priors$prior[2] <- 'sigma ~ beta(8, 12);'
+priors$prior[3] <- 'r_inv ~ gamma(0.5408871, 6.8770244);'
+bench1 <- mvgam(formula = y ~ 
+           s(ndvi_ma12, series, bs = 're') +
+           te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
+           te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
+           te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
+           te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
+           te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')) - 1,
+         data = data_train,
+         newdata = data_test,
+         family = 'nb',
+         priors = priors,
+         trend_model = 'AR1',
+         use_stan = TRUE)
+save(bench1, file = 'Outputs/bench1.rda')
 
 # Now a simpler benchmark with no GAM linear predictor;
 # This model uses independent AR1 trends with Negative Binomial observations
@@ -208,3 +240,4 @@ bench2 <- mvgam(formula = y ~ 1,
                 use_stan = TRUE,
                 priors = priors)
 save(bench2, file = 'Outputs/bench2.rda')
+
