@@ -1,191 +1,139 @@
 #### Analyse candidate models and produce model-based visualisations ####
 library(mvgam)
 library(scoringRules)
+
+# Load the pre-prepared modelling data and visualisation functions
+load('data/rodents_data_tsobjects.rda')
 source('Functions/checking_functions.R')
 
 # Load all relevant models
 load('Outputs/bench1.rda')
 load('Outputs/bench2.rda')
 load('Outputs/modvar.rda')
+load('Outputs/bench1_all.rda')
+load('Outputs/bench2_all.rda')
+load('Outputs/modvar_all.rda')
+load('Outputs/modvar.rda')
 
-# Load the pre-prepared modelling data
-load('data/rodents_data_tsobjects.rda')
-
-# Evaluate forecasts using the multivariate Variogram proper scoring rule;
-# first 5 out of sample timepoints were all NA due to the COVID pandemic
-bench1_scores <- evaluate_variogram(object = bench1, newdata = data_test)
-bench1_scores <- bench1_scores[-c(1:5)]
-bench1_lines <- predict(loess(y ~ time, span = 0.6, data = data.frame(y = log(bench1_scores),
-                                                        time = seq_len(length(bench1_scores)))),
-                        newdata = data.frame(time = seq_len(length(bench1_scores))))
-bench2_scores <- evaluate_variogram(object = bench2, newdata = data_test)
-bench2_scores <- bench2_scores[-c(1:5)]
-bench2_lines <- predict(loess(y ~ time, span = 0.6, data=data.frame(y = log(bench2_scores),
-                                                        time = seq_len(length(bench2_scores)))),
-                        newdata = data.frame(time = seq_len(length(bench2_scores))))
-modvar_scores <- evaluate_variogram(object = modvar, newdata = data_test)
-modvar_scores <- modvar_scores[-c(1:5)]
-modvar_lines <- predict(loess(y ~ time, span = 0.6, data=data.frame(y = log(modvar_scores),
-                                                        time = seq_len(length(modvar_scores)))),
-                        newdata = data.frame(time = seq_len(length(modvar_scores))))
-
+# Load the exact leave-future-out cross-validation results and plot them
+load('Outputs/roll_evaluations.rda')
+tot_scores <- matrix(NA, nrow = 3, ncol = 6)
 jpeg('Figures/variogram_scores.jpg', width = 6.25, height = 4.25,
      res = 300, units = 'in')
-par(mar=c(2, 2, 1, 1),
+layout(matrix(1:6, ncol = 3, byrow = TRUE))
+par(mar = c(2, 2, 1, 1),
     oma = c(1.25, 1.25, 0, 0))
-plot(1, type = "n", bty = 'L',
-     xaxt = 'n',
-     ylab = '',
-     ylim = c(4, 6.8),
-     xlim = c(-1.2, length(bench1_scores)),
-     xlab = '')
-lines(bench1_lines, lwd = 3.5, col = 'white')
-lines(bench1_lines, lwd = 3, col = "#8F2727")
-lines(bench2_lines, lwd = 3.5, col = 'white')
-lines(bench2_lines, lwd = 3, col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5])
-lines(modvar_lines, lwd = 3.5, col = 'white')
-lines(modvar_lines, lwd = 3)
-
-points(log(bench1_scores), pch = 16, cex = 1.2, col = 'white')
-points(log(bench1_scores), pch = 16, col = "#8F2727")
-points(log(bench2_scores), pch = 16, cex = 1.2, col = 'white')
-points(log(bench2_scores), pch = 16, col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5])
-points(log(modvar_scores), pch = 16, cex = 1.2, col = 'white')
-points(log(modvar_scores), pch = 16)
-
-axis(1, at = seq(1, 15, by = 2), labels = seq(1, 15, by = 2) + 5, cex.axis = 1,
-     tck= -0.05)
-box(bty = 'l', lwd = 2)
-text(x = 0.8, y = bench2_lines[1], labels = 'AR',
-     col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1,
-     adj = 1)
-text(x = 0.8, y = bench1_lines[1] + 0.1, labels = 'GAM-AR',
-     col = "#8F2727", cex = 1, adj = 1)
-text(x = 0.8, y = modvar_lines[1] - 0.06, labels = 'GAM-VAR',
-      cex = 1, adj = 1)
-mtext('Forecast horizon (months)', side = 1, outer = TRUE,
-      line = 0.25, cex = 0.9)
-mtext('log(Variogram score)', side = 2, outer = TRUE,
-      line = 0.3, cex = 0.9)
-dev.off()
-
-# GAM-VAR is far superior; double check using unconstrained forecasts
-sum(evaluate_variogram(object = bench1, newdata = data_test,
-                       bound = 100000), na.rm = TRUE)
-sum(evaluate_variogram(object = bench2, newdata = data_test,
-                       bound = 100000), na.rm = TRUE)
-sum(evaluate_variogram(object = modvar, newdata = data_test,
-                       bound = 100000), na.rm = TRUE)
-
-# GAM-VAR still superior
-# Plot out of sample cumulative distribution functions for competing models
-ecdf_plotdat = function(vals, x){
-  if(length(which(is.na(vals))) > (length(vals) - 3)){
+for(i in 1:6){
+  if(i == 6){
+    # If this is the primary model fitted, we need to extract 
+    # forecast scores
+    bench1_scores <- exp(log(score(forecast(bench1), score = 'variogram',
+                                   log = TRUE)$all_series$score[1:12] *
+                               score(forecast(bench1), score = 'energy',
+                                     log = TRUE)$all_series$score[1:12]))
+    bench2_scores <- exp(log(score(forecast(bench2), score = 'variogram',
+                                   log = TRUE)$all_series$score[1:12] *
+                               score(forecast(bench2), score = 'energy',
+                                     log = TRUE)$all_series$score[1:12]))
+    modvar_scores <- exp(log(score(forecast(modvar), score = 'variogram',
+                                   log = TRUE)$all_series$score[1:12] *
+                               score(forecast(modvar), score = 'energy',
+                                     log = TRUE)$all_series$score[1:12]))
+    
   } else {
-    func <- ecdf(vals)
-    func(x)
+    # Other scores are already calculated
+    bench1_scores <- exp(bench1_roll[[i]]$cmbn_score$score)
+    bench2_scores <- exp(bench2_roll[[i]]$cmbn_score$score)
+    modvar_scores <- exp(modvar_roll[[i]]$cmbn_score$score)
   }
-}
-
-# Use adjusted forecasts to compare predictive CDF
-modvar_fcs <- get_fc_constained(modvar)
-bench1_fcs <- get_fc_constained(bench1)
-bench2_fcs <- get_fc_constained(bench2)
-
-pred_ecdf = function(fc, plot_x, line_col, poly_col){
-  pred_cdfs <- do.call(rbind, (lapply(1:NROW(fc), function(x){
-    ecdf_plotdat(fc[x,], x = plot_x)
-  })))
   
-  probs <- c(0.05, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.95)
-  cred <- sapply(1:NCOL(pred_cdfs),
-                 function(n) quantile(pred_cdfs[,n],
-                                      probs = probs, na.rm = TRUE))
+  # Compute total scores
+  tot_scores[1,i] <- sum(bench1_scores, na.rm = TRUE)
+  tot_scores[2,i] <- sum(bench2_scores, na.rm = TRUE)
+  tot_scores[3,i] <- sum(modvar_scores, na.rm = TRUE)
   
-  polygon(c(plot_x, rev(plot_x)), c(cred[1,], rev(cred[9,])),
-          col = poly_col, border = line_col)
-}
-
-jpeg('Figures/fc_cdfs.jpeg', width = 6.25, height = 4.25,
-     res = 300, units = 'in')
-par(mar=c(2, 2, 1, 1),
-    oma = c(1.25, 1.25, 0, 0))
-layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
-for(x in 1:9){
-  s_name <- levels(modvar$obs_data$series)[x]
-  truths <- data.frame(y = data_test$y,
-                       series = data_test$series, 
-                       time = data_test$time) %>%
-    dplyr::filter(series == s_name) %>%
-    dplyr::select(time, y) %>%
-    dplyr::distinct() %>%
-    dplyr::arrange(time) %>%
-    dplyr::pull(y)
-  
-  plot_x <- seq(min(truths, na.rm = T),
-                max(truths, na.rm = T))
+  # Create loess smooth lines
+  bench1_lines <- loess_scores(bench1_scores)
+  bench2_lines <- loess_scores(bench2_scores)
+  modvar_lines <- loess_scores(modvar_scores)
   
   plot(1, type = "n", bty = 'L',
-       yaxt = 'n',
-       xlab = '',
        ylab = '',
-       xlim = c(min(plot_x, na.rm = TRUE), max(plot_x, na.rm = TRUE)),
-       ylim = c(0, 1))
+       ylim = c(1.6, 8),
+       xlim = c(1, length(bench1_scores)),
+       xlab = '',
+       xaxt = 'n',
+       yaxt = 'n',
+       main = bquote(italic(T)~' = '~.(ifelse(i <= 5, evaluation_seq[i],
+                                              273))))
   
-  # Add empirical quantiles of model CDFs
-  pred_ecdf(fc = bench1_fcs[[x]][,tail(1:NCOL(modvar_fcs[[1]]),length(truths))], 
-            plot_x = plot_x,
-            line_col = "#8F2727",
-            poly_col = scales::alpha("#8F2727",
-                                     0.35))
-  pred_ecdf(fc = bench2_fcs[[x]][,tail(1:NCOL(modvar_fcs[[1]]),length(truths))],
-            plot_x = plot_x,
-            line_col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5],
-            poly_col = scales::alpha(RColorBrewer::brewer.pal(n = 5, 'Blues')[5],
-                                     0.35))
+  if(i > 3){
+    axis(side = 1)
+  } else {
+    axis(side = 1, labels = NA)
+  }
   
-  pred_ecdf(fc = modvar_fcs[[x]][,tail(1:NCOL(modvar_fcs[[1]]),length(truths))],
-            plot_x = plot_x,
-            line_col = 'black',
-            poly_col = scales::alpha("black",
-                                     0.35))
-  
-  lines(x = plot_x,
-        y = ecdf_plotdat(truths,
-                         plot_x),
-        col = 'white',
-        lwd = 2)
-  lines(x = plot_x,
-        y = ecdf_plotdat(truths,
-                         plot_x),
-        col = 'black',
-        lwd = 1.5)
-  box(bty = 'L', lwd = 2)
-  
-  title(main = bquote(italic(.(species_names[x]))), cex.main = 1, line = 0.35,
-        xpd = NA)
-  if(x %in% c(1,4,7)){
+  if(i %in% c(1, 4)){
     axis(side = 2)
   } else {
     axis(side = 2, labels = NA)
   }
-  if(x == 4){
-    title(ylab = 'Cumulative distribution function', xpd = NA, line = 2.25)
-  }
-  if(x == 8){
-    title(xlab = 'Out of sample observed counts',
-          xpd = NA, line = 2.25)
+  
+  lines(bench1_lines, lwd = 3.25, 
+        col = 'white')
+  lines(bench1_lines, lwd = 2.9, 
+        col = "#8F2727")
+  lines(bench2_lines, lwd = 3.25, 
+        col = 'white')
+  lines(bench2_lines, lwd = 2.9, 
+        col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5])
+  lines(modvar_lines, lwd = 3.25, 
+        col = 'white')
+  lines(modvar_lines, lwd = 2.9)
+  
+  points(log(bench1_scores), pch = 16, cex = 0.9, 
+         col = 'white')
+  points(log(bench1_scores), pch = 16, cex = 0.7, 
+         col = "#8F2727")
+  points(log(bench2_scores), pch = 16, cex = 0.9, 
+         col = 'white')
+  points(log(bench2_scores), pch = 16, cex = 0.7, 
+         col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5])
+  points(log(modvar_scores), pch = 16, cex = 0.9, 
+         col = 'white')
+  points(log(modvar_scores), pch = 16, cex = 0.7)
+  
+  box(bty = 'l', lwd = 2)
+  if(i == 6){
+    text(x = 3.7, y = bench2_lines[3] - 0.4, labels = 'AR',
+         col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1,
+         adj = 1)
+    text(x = 4.5, y = bench1_lines[3] + 0.4, labels = 'GAM-AR',
+         col = "#8F2727", cex = 1, adj = 1)
+    text(x = 5, y = modvar_lines[3] - 0.5, labels = 'GAM-VAR',
+         cex = 1, adj = 1)
   }
 }
+mtext('Forecast horizon (lunar months)', side = 1, outer = TRUE,
+      line = 0.25, cex = 0.9)
+mtext('Weighted variogram score', side = 2, outer = TRUE,
+      line = 0.3, cex = 0.9)
 dev.off()
 
+# GAM-VAR provides lowest overall scores in four of six cv folds
+apply(tot_scores, 2, which.min)
 
-# Inspect latent trend variance estimates 
-# for the various models and compare some trends
+# GAM-VAR is superior
+# Inspect process error estimates for the various models and compare predictions
 jpeg('Figures/trend_sigmas.jpeg', width = 6.25, height = 4.25,
      res = 300, units = 'in')
 par(mar=c(2, 2, 1, 1),
     oma = c(1.25, 0, 0, 0))
+modvar_all_sigmas <- MCMCvis::MCMCchains(modvar$model_output,
+                                     'Sigma')
+names_org <- expand.grid(as.character(1:9),
+                         as.character(1:9))
+
 layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
 for(x in 1:9){
   bench1_sigmas <- MCMCvis::MCMCchains(bench1$model_output, 
@@ -194,9 +142,9 @@ for(x in 1:9){
   bench2_sigmas <- MCMCvis::MCMCchains(bench2$model_output, 
                                        paste0('sigma[', x, ']'),
                                        ISB = FALSE)
-  modvar_sigmas <- MCMCvis::MCMCchains(modvar$model_output, 
-                                       paste0('sigma[', x, ']'),
-                                       ISB = FALSE)
+  modvar_sigmas <- sqrt(modvar_all_sigmas[,  
+                                          which(names_org[,1] == x & 
+                                                  names_org[,2] == x)])
   break_seq <- seq(0, 1, length.out = 50)
   hist_data <- hist(bench1_sigmas,
                     breaks = break_seq,
@@ -208,14 +156,14 @@ for(x in 1:9){
                      breaks = break_seq,
                      plot = F)
   ylimits <- range(c(hist_data$density,
-                     hist_data$density2,
-                     hist_data$density3))
+                     hist_data2$density,
+                     hist_data3$density))
   plot(1, type = "n", bty = 'n',
        ylab = '',
        xlab = '',
        xaxt = 'n',
        yaxt = 'n',
-       xlim = c(0, 1),
+       xlim = c(0.2, 1),
        ylim = ylimits * 1.2)
   
   plot_line_hist(s = bench1_sigmas, 
@@ -252,43 +200,66 @@ for(x in 1:9){
   title(main = bquote(italic(.(species_names[x]))), cex.main = 1, line = 0.35,
         xpd = NA)
   if(x == 8){
-    title(xlab = expression(paste("Trend standard deviation (sqrt(", Sigma['var[i,i]'], "))")),
+    title(xlab = expression(paste("Process standard deviation (sqrt(", Sigma['[i,i]'], "))")),
           xpd = NA, line = 2.25)
   }
 }
 dev.off()
 
-plot(bench1, 'trend', series = 1, newdata = data_test)
-plot(bench2, 'trend', series = 1, newdata = data_test)
-plot(modvar, 'trend', series = 1, newdata = data_test)
 
-plot(bench1, 'trend', series = 2, newdata = data_test)
-plot(bench2, 'trend', series = 2, newdata = data_test)
-plot(modvar, 'trend', series = 2, newdata = data_test)
+# Look at a few unconstrained forecasts and calculate univariate
+# Discrete Rank Probability Scores
+plot(bench1, 'forecast', series = 1, newdata = data_test)
+plot(bench2, 'forecast', series = 1, newdata = data_test)
+plot(modvar, 'forecast', series = 1, newdata = data_test)
 
-plot(bench1, 'trend', series = 8, newdata = data_test)
-plot(bench2, 'trend', series = 8, newdata = data_test)
-plot(modvar, 'trend', series = 8, newdata = data_test)
+plot(bench1, 'forecast', series = 2, newdata = data_test)
+plot(bench2, 'forecast', series = 2, newdata = data_test)
+plot(modvar, 'forecast', series = 2, newdata = data_test)
 
+plot(bench1, 'forecast', series = 3, newdata = data_test)
+plot(bench2, 'forecast', series = 3, newdata = data_test)
+plot(modvar, 'forecast', series = 3, newdata = data_test)
+
+plot(bench1, 'forecast', series = 4, newdata = data_test)
+plot(bench2, 'forecast', series = 4, newdata = data_test)
+plot(modvar, 'forecast', series = 4, newdata = data_test)
+
+plot(bench1, 'forecast', series = 5, newdata = data_test)
+plot(bench2, 'forecast', series = 5, newdata = data_test)
+plot(modvar, 'forecast', series = 5, newdata = data_test)
+
+plot(bench1, 'forecast', series = 6, newdata = data_test)
+plot(bench2, 'forecast', series = 6, newdata = data_test)
+plot(modvar, 'forecast', series = 6, newdata = data_test)
+
+plot(bench1, 'forecast', series = 7, newdata = data_test)
+plot(bench2, 'forecast', series = 7, newdata = data_test)
+plot(modvar, 'forecast', series = 7, newdata = data_test)
+
+plot(bench1, 'forecast', series = 8, newdata = data_test)
+plot(bench2, 'forecast', series = 8, newdata = data_test)
+plot(modvar, 'forecast', series = 8, newdata = data_test)
+
+plot(bench1, 'forecast', series = 9, newdata = data_test)
+plot(bench2, 'forecast', series = 9, newdata = data_test)
+plot(modvar, 'forecast', series = 9, newdata = data_test)
+
+#### Analyse and evaluate the GAM-VAR model ####
 # Plot residuals for all series to look for any unmodelled 
 # systematic variation
 jpeg('Figures/resids_time.jpeg', width = 6.25, height = 4.25,
      res = 300, units = 'in')
-object = modvar
 par(mar=c(2, 2, 1, 1),
     oma = c(1.25, 1.25, 0, 0))
 layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
 for(x in 1:9){
-  plot_resids_time(object = modvar, series = x)
+  plot_resids_time(object = modvar_all, series = x)
   
   if(x > 6){
-    axis(1, at = seq(2, 320,
-                     by = 12), labels = seq(1997, 2023), cex.axis = 1,
-         tck= -0.05)
+    time_axis()
   } else {
-    axis(1, at = seq(2, 320,
-                     by = 12), labels = NA, cex.axis = 1,
-         tck= -0.05)
+    time_axis(labels = FALSE)
   }
   
   title(main = bquote(italic(.(species_names[x]))), cex.main = 1, line = 0.35,
@@ -300,14 +271,14 @@ for(x in 1:9){
 }
 dev.off()
 
-# Plot ACF functions for all series
+# Plot residual ACF functions for all series
 jpeg('Figures/resid_acfs.jpeg', width = 6.25, height = 4.25,
      res = 300, units = 'in')
 par(mar=c(2, 2, 1, 1),
     oma = c(1.25, 1.25, 0, 0))
 layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
 for(x in 1:9){
-  plot_mod_acfs(object = modvar, series = x)
+  plot_mod_acfs(object = modvar_all, series = x)
   if(x > 6){
     axis(1, at = seq(1, 24, by = 2), tck = -0.05, cex.axis = 1)
   } else {
@@ -320,20 +291,20 @@ for(x in 1:9){
     title(ylab = 'Residual autocorrelation function', xpd = NA, line = 2.25)
   }
   if(x == 8){
-    title(xlab = 'Lag (months)',
+    title(xlab = 'Lag (lunar months)',
           xpd = NA, line = 2.25)
   }
 }
 dev.off()
 
-# Plot QQ normal functions for all series
+# Plot residual QQ normal functions for all series
 jpeg('Figures/resid_qqnorms.jpeg', width = 6.25, height = 4.25,
      res = 300, units = 'in')
 par(mar=c(2, 2, 1, 1),
     oma = c(1.25, 1.25, 0, 0))
 layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
 for(x in 1:9){
-  plot_mod_qq(object = modvar, series = x)
+  plot_mod_qq(object = modvar_all, series = x)
   if(x > 6){
     axis(1, tck = -0.05, cex.axis = 1)
   } else {
@@ -357,124 +328,36 @@ for(x in 1:9){
 }
 dev.off()
 
-# Inspect overdispersion estimates for competing models, on the log scale
-jpeg('Figures/phis.jpeg', width = 6.25, height = 4.25,
+# Calculate expert-adjusted forecast distributions, constrained by 
+# the total number of available traps (196)
+cons_fcs <- get_fc_constrained(modvar)
+
+# Plot the forecasts, which will also show the Discrete Rank Probability Score
+# for the out of sample period
+jpeg('Figures/all_fcs.jpeg', width = 6.25, height = 4.25,
      res = 300, units = 'in')
 par(mar=c(2, 2, 1, 1),
-    oma = c(1.25, 0, 0, 0))
+    oma = c(1.25, 1.25, 0, 0))
 layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
 for(x in 1:9){
-  bench1_rs <- MCMCvis::MCMCchains(bench1$model_output, 
-                                       paste0('r[', x, ']'),
-                                       ISB = FALSE)
-  bench1_rs <- bench1_rs[bench1_rs < 1000]
-
-  bench2_rs <- MCMCvis::MCMCchains(bench2$model_output, 
-                                       paste0('r[', x, ']'),
-                                       ISB = FALSE)
-  bench2_rs <- bench2_rs[bench2_rs < 1000]
-
-  modvar_rs <- MCMCvis::MCMCchains(modvar$model_output, 
-                                       paste0('r[', x, ']'),
-                                       ISB = FALSE)
-  modvar_rs <- modvar_rs[modvar_rs < 1000]
-  
-  break_seq <- seq(min(c(bench1_rs, bench2_rs, modvar_rs)), 
-                   max(c(bench1_rs, bench2_rs, modvar_rs)), 
-                   length.out = floor(1 / log(quantile(modvar_rs, 0.5)) * 300))
-  hist_data <- hist(bench1_rs,
-                    breaks = break_seq,
-                    plot = F)
-  hist_data2 <- hist(bench2_rs,
-                    breaks = break_seq,
-                    plot = F)
-  hist_data3 <- hist(modvar_rs,
-                    breaks = break_seq,
-                    plot = F)
-  ylimits <- range(c(hist_data$density,
-                     hist_data$density2,
-                     hist_data$density3))
-  plot(1, type = "n", bty = 'n',
-       ylab = '',
-       xlab = '',
-       xaxt = 'n',
-       yaxt = 'n',
-       xlim = c(0, max(break_seq)),
-       ylim = ylimits * 1.2)
-
-  
-  plot_line_hist(s = bench1_rs, 
-                 min_val = min(break_seq),
-                 max_val = max(break_seq),
-                 delta = ((max(break_seq) - min(break_seq)) / 
-                            length(break_seq)),
-                 line_col = "#8F2727",
-                 poly_col = scales::alpha("#8F2727",
-                                          0.35))
-  plot_line_hist(s = bench2_rs, 
-                 min_val = min(break_seq),
-                 max_val = max(break_seq),
-                 delta = ((max(break_seq) - min(break_seq)) / 
-                            length(break_seq)),
-                 line_col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5],
-                 poly_col = scales::alpha(RColorBrewer::brewer.pal(n = 5, 'Blues')[5],
-                                          0.35))
-  plot_line_hist(s = modvar_rs, 
-                 min_val = min(break_seq),
-                 max_val = max(break_seq),
-                 delta = ((max(break_seq) - min(break_seq)) / 
-                            length(break_seq)),
-                 line_col = 'black',
-                 poly_col = scales::alpha("black",
-                                          0.35))
-  if(x > 6 ){
-    axis(side = 1, lwd = 2, cex.axis = 0.8, tck= -0.08)
-  } else {
-    axis(side = 1, lwd = 2, labels = NA, tck= -0.08)
-  }
-  
+  plot_fc_constrained(cons_fcs, series = x, newdata = data_test, 
+                      hide_xlabels = TRUE, ylab = '')
   title(main = bquote(italic(.(species_names[x]))), cex.main = 1, line = 0.35,
         xpd = NA)
-  if(x == 8){
-    title(xlab = expression(paste("Overdispersion (", phi, ")")),
-          xpd = NA, line = 2.25)
+  if(x %in% c(1, 4, 7)){
+    title(ylab = 'Posterior predictions', xpd = NA, line = 2.25)
+  }
+  
+  if(x > 6){
+    time_axis()
+  } else {
+    time_axis(labels = FALSE)
   }
 }
 dev.off()
 
-# Look at a few unconstrained forecasts and calculate univariate
-# Discrete Rank Probability Scores
-plot(bench1, 'forecast', series = 1, newdata = data_test)
-plot(bench2, 'forecast', series = 1, newdata = data_test)
-plot(modvar, 'forecast', series = 1, newdata = data_test)
-
-plot(bench1, 'forecast', series = 2, newdata = data_test)
-plot(bench2, 'forecast', series = 2, newdata = data_test)
-plot(modvar, 'forecast', series = 2, newdata = data_test)
-
-plot(bench1, 'forecast', series = 8, newdata = data_test)
-plot(bench2, 'forecast', series = 8, newdata = data_test)
-plot(modvar, 'forecast', series = 8, newdata = data_test)
-
-#### Analyse and evaluate the GAM-VAR model ####
-# First calculate expert-adjusted forecast distributions, constrained by 
-# the total number of available traps (196)
-cons_fcs <- get_fc_constained(modvar)
-
-# Plot the forecasts, which will also show the Discrete Rank Probability Score
-# for the out of sample period
-plot_fc_constained(cons_fcs, series = 1, newdata = data_test)
-plot_fc_constained(cons_fcs, series = 2, newdata = data_test)
-plot_fc_constained(cons_fcs, series = 3, newdata = data_test)
-plot_fc_constained(cons_fcs, series = 4, newdata = data_test)
-plot_fc_constained(cons_fcs, series = 5, newdata = data_test)
-plot_fc_constained(cons_fcs, series = 6, newdata = data_test)
-plot_fc_constained(cons_fcs, series = 7, newdata = data_test)
-plot_fc_constained(cons_fcs, series = 8, newdata = data_test)
-plot_fc_constained(cons_fcs, series = 9, newdata = data_test)
-
 # Plot the NDVI random slope distributions
-plot(modvar, 're')
+plot(modvar_all, 're', trend_effects = TRUE)
 
 # Plot the distributed lag posterior medians as bivariate heatmaps
 jpeg('Figures/dist_lags.jpeg', width = 6.25, height = 4.25,
@@ -482,11 +365,11 @@ jpeg('Figures/dist_lags.jpeg', width = 6.25, height = 4.25,
 par(mar=c(2, 2, 1, 1),
     oma = c(1.25, 1.25, 0, 0))
 layout(matrix(1:6, ncol = 3, nrow = 2, byrow = TRUE))
-plot_mvgam_smooth(modvar, smooth = 2)
-plot_mvgam_smooth(modvar, smooth = 3)
-plot_mvgam_smooth(modvar, smooth = 4)
-plot_mvgam_smooth(modvar, smooth = 5)
-plot_mvgam_smooth(modvar, smooth = 6)
+plot_mvgam_smooth(modvar_all, smooth = 1, trend_effects = TRUE)
+plot_mvgam_smooth(modvar_all, smooth = 2, trend_effects = TRUE)
+plot_mvgam_smooth(modvar_all, smooth = 3, trend_effects = TRUE)
+plot_mvgam_smooth(modvar_all, smooth = 4, trend_effects = TRUE)
+plot_mvgam_smooth(modvar_all, smooth = 5, trend_effects = TRUE)
 mtext('Minimum temperature (scaled)', side = 1, outer = TRUE,
       cex = 0.8)
 mtext('Lag (in months)', side = 2, outer = TRUE,
@@ -500,7 +383,7 @@ par(mar=c(2, 2, 1, 1),
     oma = c(1.25, 0, 0, 0))
 layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
 for(x in 1:9){
-  plot_ndvi_contrast(object = modvar, series = x,
+  plot_ndvi_contrast(object = modvar_all, series = x,
                      xlimits = c(-2, 2),
                      xlabel = FALSE,
                      show_xlabs = x > 6)
@@ -512,29 +395,6 @@ for(x in 1:9){
 }
 dev.off()
 
-# Plot trend + residual against NDVI to inspect any support for nonlinear functions
-jpeg('Figures/NDVI_leftovers.jpeg', width = 6.25, height = 4.25,
-     res = 300, units = 'in')
-par(mar=c(1.5, 1.5, 1, 1),
-    oma = c(1.75, 1.75, 0, 0))
-layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
-for(x in 1:9){
-  ndvi_retro_residual(object = modvar, 
-                      series = x,
-                     xlabel = FALSE,
-                     show_xlabs = x > 6,
-                     n_bins = 20)
-  title(main = bquote(italic(.(species_names[x]))), cex.main = 1, line = 0.35,
-        xpd = NA)
-  if(x == 8){
-    title(xlab = 'NDVI moving average', xpd = NA, line = 2.25)
-  }
-  if(x == 4){
-    title(ylab = 'Trend + residual', xpd = NA, line = 2.25)
-  }
-}
-dev.off()
-
 # Plot mintemp conditional curves
 jpeg('Figures/mintemp_conditionals.jpeg', width = 6.25, height = 4.25,
      res = 300, units = 'in')
@@ -542,9 +402,9 @@ par(mar=c(1.5, 1.5, 1, 1),
     oma = c(1.75, 1.75, 0, 0))
 layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
 for(x in 1:9){
-  plot_mintemp_conditional(object = modvar, series = x,
-                        xlabel = x > 6,
-                        ylabel = x %in% c(1,4,7))
+  plot_mintemp_conditional(object = modvar_all, series = x,
+                           xlabel = x > 6,
+                           ylabel = x %in% c(1,4,7))
   if(x == 4){
     title(ylab = 'Conditional minimum temperature effect (scaled)',
           xpd = NA, line = 2.25)
@@ -553,278 +413,122 @@ for(x in 1:9){
 dev.off()
 
 
-# Plot uncertainty contributions
-jpeg('Figures/uncertainty_conts.jpeg', width = 6.25, height = 4.25,
-     res = 300, units = 'in')
-par(mar=c(2, 2, 1, 1),
-    oma = c(1.25, 1.25, 0, 0))
-layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
-for(x in 1:9){
-  plot_mvgam_uncertainty(object = modvar, newdata = data_test,
-                         series = x, legend_position = 'none')
-  title(main = bquote(italic(.(species_names[x]))), cex.main = 1, line = 0.25,
-        xpd = NA)
-  if(x == 1){
-    text(1, 0.2, label="GAM component", 
-         pos = 4, col="white")
-    text(1, 0.8, label="Trend component", 
-         pos = 4, col="#7C0000")
-  }
-  if(x == 4){
-    title(ylab = 'Contribution to forecast uncertainty', xpd = NA, line = 2.25)
-  }
-  if(x == 8){
-    title(xlab = 'Forecast horizon (months)', xpd = NA, line = 2.25)
-  }
-}
-dev.off()
-
 # Plot AR and VAR coefficients
-plot_var_coefs(object = modvar)
+plot_var_coefs(object = modvar_all)
 
-# Plot some of the interesting trend comparisons
-rstan::stan_hist(modvar$model_output, c('beta_var[2,6]',
-                                        'beta_var[6,2]'))
-jpeg('Figures/DO_PE_trends.jpeg', width = 6.5, height = 6.5,
+# Plot variance-covariance estimates (as correlation matrices)
+plot_var_cors(object = modvar_all)
+
+# Plot some of the interesting forecast comparisons
+rstan::stan_hist(modvar_all$model_output, c('A[2,4]',
+                                        'A[4,2]'))
+jpeg('Figures/DO_PF_trends.jpeg', width = 6.5, height = 6.5,
      res = 300, units = 'in')
 par(mar=c(2.25, 4, 0.5, 1))
 layout(matrix(1:3, nrow = 3, byrow = T))
-plot_trend_comp(object = modvar, series1 = 2, series2 = 6,
+plot_trend_comp(object = modvar, series1 = 2, series2 = 7,
                 hide_xlabels = TRUE)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
+time_axis(labels = FALSE)
 abline(v = max(data_train$time), col = '#FFFFFF60', lwd = 2.85)
 abline(v = max(data_train$time), col = 'black', lwd = 2.5, lty = 'dashed')
-text(x = max(data_train$time) + 16, y = 2.4, labels = 'Validation')
+text(x = max(data_train$time) + 14, y = 2.05, labels = 'Testing')
 arrows(x0 = max(data_train$time) + 6, x1 = max(data_train$time) + 24,
-       y0 = 2, y1 = 2, lwd = 1, length = 0.08)
-text(x = max(data_train$time) - 15, y = 2.4, labels = 'Training')
+       y0 = 1.72, y1 = 1.72, lwd = 1, length = 0.08)
+text(x = max(data_train$time) - 15, y = 2.05, labels = 'Training')
 arrows(x0 = max(data_train$time) - 6, x1 = max(data_train$time) - 24,
-       y0 = 2, y1 = 2, lwd = 1, length = 0.08)
-text(x = 70, y = 1.8, labels = expression(italic(Dipodomys~ordii)),
+       y0 = 1.72, y1 = 1.72, lwd = 1, length = 0.08)
+text(x = 65, y = -1.45, labels = expression(italic(Dipodomys~ordii)),
      col = "#8F2727", cex = 1)
-text(x = 76, y = -1.4, labels = expression(italic(Peromyscus~eremicus)),
+text(x = 48, y = 1.8, labels = expression(italic(Perognathus~flavus)),
      col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1)
-plot_fc_constained(cons_fcs, series = 2, newdata = data_test, 
+plot_fc_constrained(cons_fcs, series = 2, newdata = data_test, 
                    hide_xlabels = TRUE,
                    ylab = 'Posterior predictions')
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
-plot_fc_constained(cons_fcs, series = 6, newdata = data_test, 
+time_axis(labels = FALSE)
+plot_fc_constrained(cons_fcs, series = 7, newdata = data_test, 
                    hide_xlabels = TRUE,
                    colours = 'blues',
                    ylab = 'Posterior predictions')
-axis(1, at = seq(2, 324,
-                 by = 12), labels = seq(1997, 2023), cex.axis = 1,
-     tck= -0.05)
+time_axis()
 dev.off()
 
 # Compare the above for the three models
-jpeg('Figures/DO_PE_trends_allmods.jpeg', width = 6.5, height = 6.5,
+jpeg('Figures/DO_PF_trends_allmods.jpeg', width = 6.5, height = 6.5,
      res = 300, units = 'in')
 par(mar=c(2.25, 4, 0.75, 1))
 layout(matrix(1:3, nrow = 3, byrow = T))
-plot_trend_comp(object = modvar, series1 = 2, series2 = 6,
+plot_trend_comp(object = modvar, series1 = 2, series2 = 7,
                 hide_xlabels = TRUE)
 title('GAM-VAR', adj = 0)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
+time_axis(labels = FALSE)
 abline(v = max(data_train$time), col = '#FFFFFF60', lwd = 2.85)
 abline(v = max(data_train$time), col = 'black', lwd = 2.5, lty = 'dashed')
-text(x = max(data_train$time) + 16, y = 2.4, labels = 'Validation')
+text(x = max(data_train$time) + 14, y = 2.05, labels = 'Testing')
 arrows(x0 = max(data_train$time) + 6, x1 = max(data_train$time) + 24,
-       y0 = 2, y1 = 2, lwd = 1, length = 0.08)
-text(x = max(data_train$time) - 15, y = 2.4, labels = 'Training')
+       y0 = 1.72, y1 = 1.72, lwd = 1, length = 0.08)
+text(x = max(data_train$time) - 15, y = 2.05, labels = 'Training')
 arrows(x0 = max(data_train$time) - 6, x1 = max(data_train$time) - 24,
-       y0 = 2, y1 = 2, lwd = 1, length = 0.08)
-text(x = 70, y = 1.8, labels = expression(italic(Dipodomys~ordii)),
+       y0 = 1.72, y1 = 1.72, lwd = 1, length = 0.08)
+text(x = 65, y = -1.25, labels = expression(italic(Dipodomys~ordii)),
      col = "#8F2727", cex = 1)
-text(x = 76, y = -1.4, labels = expression(italic(Peromyscus~eremicus)),
+text(x = 48, y = 1.8, labels = expression(italic(Perognathus~flavus)),
      col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1)
-plot_trend_comp(object = bench2, series1 = 2, series2 = 6,
+plot_trend_comp(object = bench1, series1 = 2, series2 = 7,
                 hide_xlabels = TRUE)
 title('GAM-AR', adj = 0)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
+time_axis(labels = FALSE)
 abline(v = max(data_train$time), col = '#FFFFFF60', lwd = 2.85)
 abline(v = max(data_train$time), col = 'black', lwd = 2.5, lty = 'dashed')
-plot_trend_comp(object = bench1, series1 = 2, series2 = 6,
+plot_trend_comp(object = bench2, series1 = 2, series2 = 7,
                 hide_xlabels = TRUE)
 title('AR', adj = 0)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = seq(1997, 2023), cex.axis = 1,
-     tck= -0.05)
+time_axis()
 abline(v = max(data_train$time), col = '#FFFFFF60', lwd = 2.85)
 abline(v = max(data_train$time), col = 'black', lwd = 2.5, lty = 'dashed')
 dev.off()
 
-
-rstan::stan_hist(modvar$model_output, c('beta_var[6,8]',
-                                        'beta_var[8,6]'))
-jpeg('Figures/PE_PP_trends.jpeg', width = 6.5, height = 6.5,
-     res = 300, units = 'in')
-par(mar=c(2.25, 4, 0.5, 1))
-layout(matrix(1:3, nrow = 3, byrow = T))
-plot_trend_comp(object = modvar, series1 = 6, series2 = 8,
-                hide_xlabels = TRUE)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
-abline(v = max(data_train$time), col = '#FFFFFF60', lwd = 2.85)
-abline(v = max(data_train$time), col = 'black', lwd = 2.5, lty = 'dashed')
-text(x = max(data_train$time) + 16, y = 2.35, labels = 'Validation')
-arrows(x0 = max(data_train$time) + 6, x1 = max(data_train$time) + 24,
-       y0 = 1.95, y1 = 1.95, lwd = 1, length = 0.08)
-text(x = max(data_train$time) - 15, y = 2.35, labels = 'Training')
-arrows(x0 = max(data_train$time) - 6, x1 = max(data_train$time) - 24,
-       y0 = 1.95, y1 = 1.95, lwd = 1, length = 0.08)
-text(x = 50, y = -2.7, labels = expression(italic(Perognathus~eremicus)),
-     col = "#8F2727", cex = 1)
-text(x = 44, y = 1.9, labels = expression(italic(Chaetodipus~penicillatus)),
-     col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1)
-plot_fc_constained(cons_fcs, series = 6, newdata = data_test, 
-                   hide_xlabels = TRUE,
-                   ylab = 'Posterior predictions')
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
-plot_fc_constained(cons_fcs, series = 8, newdata = data_test, 
-                   hide_xlabels = TRUE,
-                   colours = 'blues',
-                   ylab = 'Posterior predictions')
-axis(1, at = seq(2, 324,
-                 by = 12), labels = seq(1997, 2023), cex.axis = 1,
-     tck= -0.05)
-dev.off()
-
-
-
-rstan::stan_hist(modvar$model_output, c('beta_var[4,7]',
-                                        'beta_var[7,4]'))
-jpeg('Figures/OT_PF_trends.jpeg', width = 6.5, height = 6.5,
-     res = 300, units = 'in')
-par(mar=c(2.25, 4, 0.5, 1))
-layout(matrix(1:3, nrow = 3, byrow = T))
-plot_trend_comp(object = modvar, series1 = 4, series2 = 7,
-                hide_xlabels = TRUE)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
-abline(v = max(data_train$time), col = '#FFFFFF60', lwd = 2.85)
-abline(v = max(data_train$time), col = 'black', lwd = 2.5, lty = 'dashed')
-text(x = max(data_train$time) + 16, y = 2.35, labels = 'Validation')
-arrows(x0 = max(data_train$time) + 6, x1 = max(data_train$time) + 24,
-       y0 = 1.95, y1 = 1.95, lwd = 1, length = 0.08)
-text(x = max(data_train$time) - 15, y = 2.35, labels = 'Training')
-arrows(x0 = max(data_train$time) - 6, x1 = max(data_train$time) - 24,
-       y0 = 1.95, y1 = 1.95, lwd = 1, length = 0.08)
-text(x = 80, y = 2.5, labels = expression(italic(Onychomys~torridus)),
-     col = "#8F2727", cex = 1)
-text(x = 44, y = -1.8, labels = expression(italic(Perognathus~flavus)),
-     col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1)
-plot_fc_constained(cons_fcs, series = 4, newdata = data_test, 
-                   hide_xlabels = TRUE,
-                   ylab = 'Posterior predictions')
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
-plot_fc_constained(cons_fcs, series = 7, newdata = data_test, 
-                   hide_xlabels = TRUE,
-                   colours = 'blues',
-                   ylab = 'Posterior predictions')
-axis(1, at = seq(2, 324,
-                 by = 12), labels = seq(1997, 2023), cex.axis = 1,
-     tck= -0.05)
-dev.off()
-
-
-rstan::stan_hist(modvar$model_output, c('beta_var[1,3]',
-                                        'beta_var[3,1]'))
-jpeg('Figures/DM_OL_trends.jpeg', width = 6.5, height = 6.5,
-     res = 300, units = 'in')
-par(mar=c(2.25, 4, 0.5, 1))
-layout(matrix(1:3, nrow = 3, byrow = T))
-plot_trend_comp(object = modvar, series1 = 1, series2 = 3,
-                hide_xlabels = TRUE)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
-abline(v = max(data_train$time), col = '#FFFFFF60', lwd = 2.85)
-abline(v = max(data_train$time), col = 'black', lwd = 2.5, lty = 'dashed')
-text(x = max(data_train$time) + 16, y = 2.35, labels = 'Validation')
-arrows(x0 = max(data_train$time) + 6, x1 = max(data_train$time) + 24,
-       y0 = 1.95, y1 = 1.95, lwd = 1, length = 0.08)
-text(x = max(data_train$time) - 15, y = 2.35, labels = 'Training')
-arrows(x0 = max(data_train$time) - 6, x1 = max(data_train$time) - 24,
-       y0 = 1.95, y1 = 1.95, lwd = 1, length = 0.08)
-text(x = 60, y = 1.9, labels = expression(italic(Dipodomys~merriami)),
-     col = "#8F2727", cex = 1)
-text(x = 44, y = -2.7, labels = expression(italic(Onychomys~leucogaster)),
-     col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1)
-plot_fc_constained(cons_fcs, series = 1, newdata = data_test, 
-                   hide_xlabels = TRUE,
-                   ylab = 'Posterior predictions')
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
-plot_fc_constained(cons_fcs, series = 3, newdata = data_test, 
-                   hide_xlabels = TRUE,
-                   colours = 'blues',
-                   ylab = 'Posterior predictions')
-axis(1, at = seq(2, 324,
-                 by = 12), labels = seq(1997, 2023), cex.axis = 1,
-     tck= -0.05)
-dev.off()
+# Calculate Generalized Impulse Response Functions
+all_irfs <- calc_irfs(modvar_all)
 
 # Plot impulse response functions for select species
-plot_impulse_responses(object = modvar, 
+plot_impulse_responses(all_irfs = all_irfs, 
                        series = 1, 
                        filepath = 'Figures/DM_imp_response.jpg')
-plot_impulse_responses(object = modvar, 
+plot_impulse_responses(all_irfs = all_irfs, 
                        series = 2, 
                        filepath = 'Figures/DO_imp_response.jpg')
-plot_impulse_responses(object = modvar, 
+plot_impulse_responses(all_irfs = all_irfs,  
                        series = 5, 
                        filepath = 'Figures/PB_imp_response.jpg')
-plot_impulse_responses(object = modvar, 
-                       series = 7, 
-                       filepath = 'Figures/PF_imp_response.jpg')
-plot_impulse_responses(object = modvar, 
+plot_impulse_responses(all_irfs = all_irfs,  
                        series = 8, 
                        filepath = 'Figures/PP_imp_response.jpg')
 
-# Plot variance decompositions for select species
-var_decomps <- calculate_var_decomps(modvar)
 
-# Plot for species 3, 4, 2 and 8
-jpeg('Figures/var_decomps.jpg', width = 6.25, height = 4.25,
+# Plot variance decompositions for select species
+var_decomps <- calc_vardecomps(object = modvar_all)
+
+# Inspect variance decompositions for a few species in more detail
+jpeg('Figures/var_decomps.jpg', width = 6.25, height = 3.2,
      res = 300, units = 'in')
 par(mar=c(2, 2, 1, 1),
     oma = c(1.25, 1.25, 0, 0))
-layout(matrix(1:4, ncol = 2, nrow = 2, byrow = TRUE))
-series = 3
-all_creds <- matrix(NA, nrow = 9, ncol = 6)
+layout(matrix(1:2, ncol = 2, nrow = 1, byrow = TRUE))
+series = 7
+all_creds <- matrix(NA, nrow = 9, ncol = 12)
 for(i in 1:9){
-  all_creds[i,] <- get_decomp_creds(var_decomps, series, i)[5,]
+  all_creds[i,] <- get_decomp_creds(var_decomps, series, i)[5,1:12]
 }
-normalise = function(x){
-  x / sum(x)
-}
-all_creds <- apply(all_creds, 2, normalise)
 
-pred_vals <- 1:6
+pred_vals <- 1:12
 plot(1, type = "n", bty = 'L',
-     xlab = 'Forecast horizon (months)',
+     xlab = 'Forecast horizon (lunar months)',
      xaxt = 'n',
      ylab = '',
-     xlim = c(1, 6),
-     ylim = c(min(all_creds) - 0.01, max(all_creds) + 0.01))
+     xlim = c(1, 12),
+     ylim = range(all_creds))
 cols <- rep('grey80', 9)
-cols[5] <- "#8F2727"
+cols[4] <- "#8F2727"
 cols[8] <- RColorBrewer::brewer.pal(n = 5, 'Blues')[5]
 for(i in 1:9){
   lines(pred_vals, all_creds[i, ], col = 'white', lwd = 1.5)
@@ -833,44 +537,40 @@ for(i in 1:9){
 lines(pred_vals, all_creds[series, ], col = 'white', lwd = 3.5)
 lines(pred_vals, all_creds[series, ], col = 'black', lwd = 3)
 
-lines(pred_vals, all_creds[5, ], col = 'white', lwd = 3.5)
-lines(pred_vals, all_creds[5, ], col = cols[5], lwd = 3)
-lines(pred_vals, all_creds[8, ], col = 'white', lwd = 3.5)
-lines(pred_vals, all_creds[8, ], col = cols[8], lwd = 3)
+lines(pred_vals, all_creds[3, ], col = 'white', lwd = 3.5)
+lines(pred_vals, all_creds[3, ], col = cols[4], lwd = 3)
+lines(pred_vals, all_creds[7, ], col = 'white', lwd = 3.5)
+lines(pred_vals, all_creds[7, ], col = cols[8], lwd = 3)
 
-text(x = 2.1, y = .15, labels = bquote(italic(.(species_names[5]))),
-     col = "#8F2727", cex = 1, srt = 350)
-text(x = 3.55, y = .072, labels = bquote(italic(.(species_names[8]))),
+text(x = 5.10, y = .34, labels = bquote(italic(.(abbrev_names[3]))),
+     col = "#8F2727", cex = 1)
+text(x = 3.50, y = .12, labels = bquote(italic(.(abbrev_names[7]))),
      col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1)
 
 box(bty = 'L', lwd = 2)
 title(main = bquote(italic(.(species_names[series]))), cex.main = 1, line = 0.35,
       xpd = NA)
 axis(1, cex.axis = 1,
-     labels = NA,
      tck= -0.05)
 
-# Series 4
-series = 4
-all_creds <- matrix(NA, nrow = 9, ncol = 6)
+# Series 6
+series = 6
+all_creds <- matrix(NA, nrow = 9, ncol = 12)
 for(i in 1:9){
-  all_creds[i,] <- get_decomp_creds(var_decomps, series, i)[5,]
+  all_creds[i,] <- get_decomp_creds(var_decomps, series, i)[5,1:12]
 }
-normalise = function(x){
-  x / sum(x)
-}
-all_creds <- apply(all_creds, 2, normalise)
 
-pred_vals <- 1:6
+pred_vals <- 1:12
 plot(1, type = "n", bty = 'L',
-     xlab = 'Forecast horizon (months)',
+     xlab = 'Forecast horizon (lunar months)',
      xaxt = 'n',
+     yaxt = 'n',
      ylab = '',
-     xlim = c(1, 6),
-     ylim = c(min(all_creds) - 0.01, max(all_creds) + 0.01))
+     xlim = c(1, 12),
+     ylim = c(0, 1))
 cols <- rep('grey80', 9)
-cols[7] <- "#8F2727"
-cols[8] <- RColorBrewer::brewer.pal(n = 5, 'Blues')[5]
+cols[4] <- "#8F2727"
+cols[5] <- RColorBrewer::brewer.pal(n = 5, 'Blues')[5]
 for(i in 1:9){
   lines(pred_vals, all_creds[i, ], col = 'white', lwd = 1.5)
   lines(pred_vals, all_creds[i, ], col = cols[i], lwd = 1)
@@ -878,118 +578,28 @@ for(i in 1:9){
 lines(pred_vals, all_creds[series, ], col = 'white', lwd = 3.5)
 lines(pred_vals, all_creds[series, ], col = 'black', lwd = 3)
 
-lines(pred_vals, all_creds[7, ], col = 'white', lwd = 3.5)
-lines(pred_vals, all_creds[7, ], col = cols[7], lwd = 3)
-lines(pred_vals, all_creds[8, ], col = 'white', lwd = 3.5)
-lines(pred_vals, all_creds[8, ], col = cols[8], lwd = 3)
-
-text(x = 2.4, y = .08, labels = bquote(italic(.(species_names[7]))),
-     col = "#8F2727", cex = 1)
-text(x = 2.4, y = .135, labels = bquote(italic(.(species_names[8]))),
-     col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1,
-     srt = 342)
-
-box(bty = 'L', lwd = 2)
-title(main = bquote(italic(.(species_names[series]))), cex.main = 1, line = 0.35,
-      xpd = NA)
-axis(1, cex.axis = 1,
-     labels = NA,
-     tck= -0.05)
-
-# Series 2
-series = 2
-all_creds <- matrix(NA, nrow = 9, ncol = 6)
-for(i in 1:9){
-  all_creds[i,] <- get_decomp_creds(var_decomps, series, i)[5,]
-}
-normalise = function(x){
-  x / sum(x)
-}
-all_creds <- apply(all_creds, 2, normalise)
-
-pred_vals <- 1:6
-plot(1, type = "n", bty = 'L',
-     xlab = 'Forecast horizon (months)',
-     xaxt = 'n',
-     ylab = '',
-     xlim = c(1, 6),
-     ylim = c(min(all_creds) - 0.01, max(all_creds) + 0.01))
-cols <- rep('grey80', 9)
-cols[7] <- "#8F2727"
-cols[9] <- RColorBrewer::brewer.pal(n = 5, 'Blues')[5]
-for(i in 1:9){
-  lines(pred_vals, all_creds[i, ], col = 'white', lwd = 1.5)
-  lines(pred_vals, all_creds[i, ], col = cols[i], lwd = 1)
-}
-lines(pred_vals, all_creds[series, ], col = 'white', lwd = 3.5)
-lines(pred_vals, all_creds[series, ], col = 'black', lwd = 3)
-
-lines(pred_vals, all_creds[7, ], col = 'white', lwd = 3.5)
-lines(pred_vals, all_creds[7, ], col = cols[7], lwd = 3)
-lines(pred_vals, all_creds[9, ], col = 'white', lwd = 3.5)
-lines(pred_vals, all_creds[9, ], col = cols[9], lwd = 3)
-
-text(x = 2.99, y = .15, labels = bquote(italic(.(species_names[7]))),
-     col = "#8F2727", cex = 1, srt = 352)
-text(x = 2.75, y = .075, labels = bquote(italic(.(species_names[9]))),
-     col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1,
-     srt = 7)
-
-box(bty = 'L', lwd = 2)
-title(main = bquote(italic(.(species_names[series]))), cex.main = 1, line = 0.35,
-      xpd = NA)
-axis(1, cex.axis = 1,
-     tck= -0.05)
-
-# Series 8
-series = 8
-all_creds <- matrix(NA, nrow = 9, ncol = 6)
-for(i in 1:9){
-  all_creds[i,] <- get_decomp_creds(var_decomps, series, i)[5,]
-}
-normalise = function(x){
-  x / sum(x)
-}
-all_creds <- apply(all_creds, 2, normalise)
-
-pred_vals <- 1:6
-plot(1, type = "n", bty = 'L',
-     xlab = 'Forecast horizon (months)',
-     xaxt = 'n',
-     ylab = '',
-     xlim = c(1, 6),
-     ylim = c(min(all_creds) - 0.01, max(all_creds) + 0.01))
-cols <- rep('grey80', 9)
-cols[9] <- "#8F2727"
-cols[3] <- RColorBrewer::brewer.pal(n = 5, 'Blues')[5]
-for(i in 1:9){
-  lines(pred_vals, all_creds[i, ], col = 'white', lwd = 1.5)
-  lines(pred_vals, all_creds[i, ], col = cols[i], lwd = 1)
-}
-lines(pred_vals, all_creds[series, ], col = 'white', lwd = 3.5)
-lines(pred_vals, all_creds[series, ], col = 'black', lwd = 3)
-
-lines(pred_vals, all_creds[9, ], col = 'white', lwd = 3.5)
-lines(pred_vals, all_creds[9, ], col = cols[9], lwd = 3)
 lines(pred_vals, all_creds[3, ], col = 'white', lwd = 3.5)
-lines(pred_vals, all_creds[3, ], col = cols[3], lwd = 3)
+lines(pred_vals, all_creds[3, ], col = cols[4], lwd = 3)
+lines(pred_vals, all_creds[6, ], col = 'white', lwd = 3.5)
+lines(pred_vals, all_creds[6, ], col = cols[5], lwd = 3)
 
-text(x = 3, y = .159, labels = bquote(italic(.(species_names[9]))),
+text(x = 3.1, y = .155, labels = bquote(italic(.(abbrev_names[3]))),
      col = "#8F2727", cex = 1)
-text(x = 3, y = .082, labels = bquote(italic(.(species_names[3]))),
-     col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1,
-     srt = 5)
+text(x = 4, y = .082, labels = bquote(italic(.(abbrev_names[6]))),
+     col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1)
 
 box(bty = 'L', lwd = 2)
 title(main = bquote(italic(.(species_names[series]))), cex.main = 1, line = 0.35,
       xpd = NA)
 axis(1, cex.axis = 1,
      tck= -0.05)
-mtext('Forecast horizon (months)', side = 1, outer = TRUE,
+axis(2, labels = NA)
+mtext('Forecast horizon (lunar months)', side = 1, outer = TRUE,
       line = 0.25, cex = 0.9)
 mtext('Proportional contribution to trend variance', side = 2, outer = TRUE,
       line = 0.3, cex = 0.9)
 dev.off()
+
 
 #### A final figure to illustrate changes in community composition over time ####
 points_circle <- function(n = 196, alpha = 2, 
@@ -1028,13 +638,14 @@ jpeg('Figures/med_community_comps.jpg', width = 6.25, height = 2.85,
 par(mar=c(1, 1, 1.5, 1),
     oma = c(0, 0, 0, 0))
 layout(matrix(1:8, nrow = 2, byrow = TRUE))
-modvar_mus <- MCMCvis::MCMCchains(modvar$model_output, 'mus')
+modvar_mus <- MCMCvis::MCMCchains(modvar_all$model_output, 'mus')
 for(i in seq(1999, 2022, by = 3)){
-  index <- unique(data_train$time[which(data_train$year == i & data_train$month == 7)])
-  med_counts = data.frame(series = levels(data_train$series),
-                          med_count = unlist(lapply(seq_len(length(levels(data_train$series))), function(x){
+  print(i)
+  index <- min(unique(data_all$time[which(data_all$year == i & data_all$month == 7)]))
+  med_counts = data.frame(series = levels(data_all$series),
+                          med_count = unlist(lapply(seq_len(length(levels(data_all$series))), function(x){
                             exp(quantile(modvar_mus[,seq(x,dim(modvar_mus)[2],
-                                                         by = length(levels(data_train$series)))][,index], probs = 0.5))
+                                                         by = length(levels(data_all$series)))][,index], probs = 0.5))
                           })))
   points_circle(med_counts = med_counts, n = 250)
   title(main = paste0(i-2, ' - ', i), cex.main = 0.85, line = 0.95,
