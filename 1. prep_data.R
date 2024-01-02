@@ -35,40 +35,13 @@ rodents_table %>%
                 maxtemp = as.vector(scale(maxtemp))) %>%
   dplyr::mutate(ndvi_ma12 = zoo::rollmean(ndvi, k = 12, align = 'right',
                                              na.pad = TRUE)) %>%
-  # Keep the first observation if multiple taken in the same month
-  dplyr::arrange(year, month) %>%
-  dplyr::group_by(month, year) %>%
-  dplyr::slice_head(n = 1) %>%
-  tidyr::pivot_longer(cols = portalcasting::species_from_table(rodents_tab = rodents_table, 
-                                                               total = TRUE, 
-                                                               nadot = TRUE),
+  tidyr::pivot_longer(cols = colnames(rodents_table)[4:24],
                       names_to = 'series', values_to = 'y') %>%
   dplyr::select(y, series, month, year, 
-                newmoonnumber, mintemp:ndvi_ma12)  -> model_dat
+                newmoonnumber, mintemp:ndvi_ma12) %>%
+  dplyr::mutate(time = newmoonnumber - (min(newmoonnumber) - 1))-> model_dat
 
-# Add missing sampling time points
-model_dat %>%
-  dplyr::left_join(data.frame(year = lubridate::year(seq(as.Date("1996/1/1"),
-                                      as.Date(tail(rodents_table$date, 1)), by = "month")),
-           month = lubridate::month(seq(as.Date("1996/1/1"),
-                                       as.Date(tail(rodents_table$date, 1)), by = "month")),
-           time = 1:length(seq(as.Date("1996/1/1"),
-                               as.Date(tail(rodents_table$date, 1)), by = "month")))) -> model_dat
-
-model_dat %>%
-  dplyr::full_join(expand.grid(time = min(model_dat$time):max(model_dat$time),
-                               series = unique(model_dat$series))) %>%
-  dplyr::ungroup() %>%
-  dplyr::select(-year, -month) -> model_dat
-
-model_dat %>%
-  dplyr::left_join(data.frame(year = lubridate::year(seq(as.Date("1996/1/1"),
-                                                         as.Date(tail(rodents_table$date, 1)), by = "month")),
-                              month = lubridate::month(seq(as.Date("1996/1/1"),
-                                                           as.Date(tail(rodents_table$date, 1)), by = "month")),
-                              time = 1:length(seq(as.Date("1996/1/1"),
-                                                  as.Date(tail(rodents_table$date, 1)), by = "month")))) -> model_dat
-
+# Check that dimensions match
 (max(model_dat$time) * length(unique(model_dat$series))) == NROW(model_dat)
 
 
@@ -87,7 +60,6 @@ model_dat %>%
   dplyr::filter(series != 'total') %>%
   dplyr::mutate(series = as.factor(series)) %>%
   dplyr::arrange(time, series) -> model_dat
-
 
 # Feature engineering
 #1. Distributed lag matrices for environmental covariates
@@ -213,7 +185,6 @@ weights_pf[!(model_dat$series == 'PF'), ] <- 0
 weights_pp[!(model_dat$series == 'PP'), ] <- 0
 weights_rm[!(model_dat$series == 'RM'), ] <- 0
 
-
 # Create a list to store the full dataset, including lag matrices and 
 # moving averages for the environmental covariates 
 data_all <- list(lag = lag, 
@@ -237,8 +208,11 @@ data_all <- list(lag = lag,
                  series = model_dat$series,
                  time = model_dat$time)
 
-# Split data into training and testing
-train_inds <- which(model_dat$year < 2021)
+# Split data into training and testing; stop training 
+# at the end of 2018 so that 2019 can be evaluated. Conditions were 
+# challenging in COVID and post-COVID, so evaluation of models may not be 
+# as 'fair'
+train_inds <- which(model_dat$year < 2019)
 
 data_train <- lapply(seq_along(data_all), function(x){
   if(is.matrix(data_all[[x]])){
@@ -248,7 +222,7 @@ data_train <- lapply(seq_along(data_all), function(x){
   }
 })
 
-test_inds <- which(model_dat$year %in% c(2021, 2022))
+test_inds <- which(model_dat$year %in% c(2019))
 
 data_test <- lapply(seq_along(data_all), function(x){
   if(is.matrix(data_all[[x]])){
@@ -267,6 +241,7 @@ save(model_dat,
      file = 'data/rodents_data_tsobjects.rda')
 
 # Plot some useful descriptors of the raw data
+source('Functions/checking_functions.R')
 plot_raw_series()
 plot_raw_hists()
 plot_raw_acfs()
@@ -276,6 +251,11 @@ totals <- data.frame(y = data_all$y,
   dplyr::group_by(time) %>%
   dplyr::summarise(total = sum(y))
 
+data.frame(time = data_all$time, year = data_all$year) %>%
+  dplyr::group_by(year) %>%
+  dplyr::summarise(min_time = min(time)) %>%
+  dplyr::filter(year > 1996) -> year_times
+
 jpeg('Figures/total_series.jpg', width = 5, height = 3.25,
      res = 300, units = 'in')
 par(mar=c(2, 2, 1, 1),
@@ -283,12 +263,11 @@ par(mar=c(2, 2, 1, 1),
   truth <- totals$total
   plot(1, type = "n", bty = 'L',
        xaxt = 'n',
-       ylab = 'No. captures',
+       ylab = '',
        ylim = range(c(truth), na.rm = TRUE),
        xlim = c(0, length(c(truth))),
        xlab = '')
-  axis(1, at = seq(2, 324,
-                   by = 12), labels = seq(1997, 2023), cex.axis = 1,
+  axis(1, at = year_times$min_time, labels = year_times$year, cex.axis = 1,
        tck= -0.025)
   lines(x = 1:length(truth), y = truth, lwd = 2, col = "#8F2727")
   title(main = 'Full community (9 included species)', cex.main = 1, line = 0.1,
@@ -300,16 +279,16 @@ dev.off()
 
 # Training statistics
 totals %>%
-  dplyr::filter(time < 289) %>%
+  dplyr::filter(time < 273) %>%
   summary()
 
 data_all$year[totals %>%
-  dplyr::filter(time < 289) %>%
+  dplyr::filter(time < 273) %>%
   pull(total) %>%
   which.min()]
 
 totals %>%
-  dplyr::filter(time >= 289) %>%
+  dplyr::filter(time >= 273) %>%
   summary()
 
 # Plot descriptors of covariates; first an STL decomposition of mintemp
@@ -331,9 +310,7 @@ plot(1, type = "n", bty = 'L',
      xlab = '')
 lines(as.vector(mintemp_stl[,1]), lwd = 2)
 box(bty = 'l', lwd = 2)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
+time_axis(labels = FALSE)
 
 plot(1, type = "n", bty = 'L',
      xaxt = 'n',
@@ -343,9 +320,7 @@ plot(1, type = "n", bty = 'L',
      xlab = '')
 lines(as.vector(scale(mintemp_stl[,2])), lwd = 2)
 box(bty = 'l', lwd = 2)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
+time_axis(labels = FALSE)
 
 plot(1, type = "n", bty = 'L',
      xaxt = 'n',
@@ -355,9 +330,7 @@ plot(1, type = "n", bty = 'L',
      xlab = '')
 lines(as.vector(scale(mintemp_stl[,3])), lwd = 2)
 box(bty = 'l', lwd = 2)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = seq(1997, 2023), cex.axis = 1,
-     tck= -0.05)
+time_axis()
 dev.off()
 
 # Now a time series of NDVI
@@ -377,9 +350,7 @@ plot(1, type = "n", bty = 'L',
      xlab = '')
 lines(ndvi_ts, lwd = 2)
 box(bty = 'l', lwd = 2)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = NA, cex.axis = 1,
-     tck= -0.05)
+time_axis(labels = FALSE)
 
 plot(1, type = "n", bty = 'L',
      xaxt = 'n',
@@ -389,8 +360,6 @@ plot(1, type = "n", bty = 'L',
      xlab = '')
 lines(ndvi_ma12_ts, lwd = 2)
 box(bty = 'l', lwd = 2)
-axis(1, at = seq(2, 324,
-                 by = 12), labels = seq(1997, 2023), cex.axis = 1,
-     tck= -0.05)
+time_axis()
 dev.off()
 
