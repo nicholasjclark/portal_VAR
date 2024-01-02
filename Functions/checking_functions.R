@@ -18,7 +18,6 @@ plot_line_hist <- function(s, min_val, max_val,
   y <- counts[idx]
   y <- c(0, y, 0)
   
-  ymax <- max(y) + 1
   lines(x, y, lwd = 2, col = 'white')
   lines(x, y, lwd = 1.5, col = line_col)
   polygon(x, y, col = poly_col, border = NA)
@@ -34,6 +33,33 @@ species_names <- c('Dipodomys merriami',
                    'Perognathus flavus',
                    'Chaetodipus penicillatus',
                    'Reithrodontomys megalotis')
+
+abbrev_names <- c('D. merriami',
+                   'D. ordii',
+                   'O. leucogaster',
+                   'O. torridus',
+                   'C. baileyi',
+                   'P. eremicus',
+                   'P. flavus',
+                   'C. penicillatus',
+                   'R. megalotis')
+
+#### For formatting time series x axes ####
+data.frame(time = data_all$time, year = data_all$year) %>%
+  dplyr::group_by(year) %>%
+  dplyr::summarise(min_time = min(time)) %>%
+  dplyr::filter(year > 1996) -> year_times
+
+time_axis = function(labels = TRUE){
+  if(labels){
+    axis(1, at = year_times$min_time, labels = year_times$year, cex.axis = 1,
+         tck= -0.05)
+  } else {
+    axis(1, at = year_times$min_time, labels = NA, cex.axis = 1,
+         tck= -0.05)
+  }
+
+}
 
 #### Plot raw data descriptions ####
 plot_raw_series = function(filepath = 'Figures/raw_series.jpg'){
@@ -55,13 +81,9 @@ plot_raw_series = function(filepath = 'Figures/raw_series.jpg'){
          xlim = c(0, length(c(truth))),
          xlab = '')
     if(x > 6){
-      axis(1, at = seq(2, 324,
-                       by = 12), labels = seq(1997, 2023), cex.axis = 1,
-           tck= -0.05)
+      time_axis()
     } else {
-      axis(1, at = seq(2, 324,
-                       by = 12), labels = NA, cex.axis = 1,
-           tck= -0.05)
+      time_axis(labels = FALSE)
     }
     lines(x = 1:length(truth), y = truth, lwd = 1.25, col = "#8F2727")
     title(main = bquote(italic(.(species_names[x]))), cex.main = 1, line = 0.1,
@@ -134,7 +156,7 @@ plot_raw_acfs = function(filepath = 'Figures/raw_acfs.jpg'){
       title(ylab = 'Autocorrelation function', xpd = NA, line = 2.25)
     }
     if(x == 8){
-      title(xlab = 'Temporal lag (months)', xpd = NA, line = 2.25)
+      title(xlab = 'Temporal lag (lunar months)', xpd = NA, line = 2.25)
     }
   }
   dev.off()
@@ -142,7 +164,7 @@ plot_raw_acfs = function(filepath = 'Figures/raw_acfs.jpg'){
 
 
 #### Get constrained forecast distribution ####
-get_fc_constained = function(object, 
+get_fc_constrained = function(object, 
                              bound = 196,
                              newdata){
   
@@ -186,7 +208,8 @@ get_fc_constained = function(object,
 }
 
 #### Variogram score probabilistic forecast evaluation ####
-evaluate_variogram = function(object, newdata, bound = 196){
+evaluate_variogram = function(object, newdata, bound = 196,
+                              weights = NULL){
   
   truth_data <- data.frame(y = newdata$y,
                           time = newdata$time,
@@ -207,7 +230,7 @@ evaluate_variogram = function(object, newdata, bound = 196){
   # Note, this assumes the data in newdata have already been fed to the model
   # as missing observations!!!!
   fc_length <- length(unique(newdata$time))
-  fcs <- get_fc_constained(object, bound = bound)
+  fcs <- get_fc_constrained(object, bound = bound)
   fcs <- lapply(seq_along(fcs), function(series){
     preds <- fcs[[series]]
     preds[, tail(1:NCOL(preds), fc_length)]
@@ -223,13 +246,19 @@ evaluate_variogram = function(object, newdata, bound = 196){
   # from the forecast distribution (scoringRules::vs_sample uses the 
   # mean, which is not appropriate for skewed distributions)
   variogram_score = function(obs, fc_sample){
+    
+    # log the truth and fc so that we aren't attributing huge amount of weight
+    #   # to the more abundant species
+      obs <- log(obs + 0.001)
+      fc_sample <- log(fc_sample + 0.001)
+
     out <- matrix(NA, length(obs), length(obs))
     for(i in 1:length(obs)){
       for(j in 1:length(obs)){
         if(i == j){
           out[i,j] <- 0
         } else {
-          v_fc <- quantile(abs(fc_sample[i,] - fc_sample[j,]) ^ 0.5, 0.5)
+          v_fc <- quantile(abs(fc_sample[i,] -  fc_sample[j,]) ^ 0.5, 0.5)
           v_dat <- abs(obs[i] - obs[j]) ^ 0.5
           out[i,j] <- 2 * ((v_dat - v_fc) ^ 2)
         }
@@ -241,12 +270,105 @@ evaluate_variogram = function(object, newdata, bound = 196){
   }
   
   # Calculate variogram score on all observations in fc_horizon
-  unlist(lapply(seq_len(fc_length), function(horizon){
+  vg_scores <- unlist(lapply(seq_len(fc_length), function(horizon){
     variogram_score(obs = truths[,horizon], 
                     fc_sample = fcs_per_horizon[[horizon]])   
   }))
+  
+  # Calculate scaled DRPS for weighting the variogram score by sharpness
+  drps_scores <- rowSums(do.call(cbind, lapply(seq_along(fcs), function(series){
+    mvgam:::drps_mcmc_object(fc = log(t(fcs[[series]]) + 0.001), 
+                             truth = log(truths[series,] + 0.001))[,1]
+  }))) 
+  vg_scores * drps_scores
 }
 
+#### Function to use exact leave-future-out cross-validation to evaluate models
+# on a small subset of evaluation splits (5 splits) ####
+lfo_exact = function(object, data, last_train, fc_horizon = 12){
+  
+  # Split data into training and testing at the appropriate time point
+  data_split <- mvgam:::cv_split(data, last_train = last_train,
+                                 fc_horizon = fc_horizon)
+  
+  # Update the model using the new data splits
+  split_mod <- mvgam:::lfo_update(object,
+                                  data = data_split$data_train,
+                                  newdata = data_split$data_test,
+                                  lfo = TRUE,
+                                  burnin = 300,
+                                  samples = 500)
+  
+  # Extract forecast distributions
+  fc <- forecast(split_mod)
+  
+  # Calculate forecast scores
+  fc_score_energy <- data.frame(score = 
+                                  score(fc, score = 'energy',
+                                        log = TRUE)$all_series$score[1:fc_horizon])
+  fc_score_energy$eval_timepoint <- last_train
+  
+  fc_score_var <- data.frame(score = score(fc, score = 'variogram', 
+                        log = TRUE)$all_series$score[1:fc_horizon])
+  fc_score_var$eval_timepoint <- last_train
+  
+  cmbn_score <- fc_score_var
+  cmbn_score$score <- log(fc_score_var$score * fc_score_energy$score)
+  cmbn_score$score_type <- 'combination'
+  
+  # Return scores
+  return(list(energy_score = fc_score_energy, 
+              var_score = fc_score_var,
+              cmbn_score = cmbn_score))
+}
+
+#### Function to fit a LOESS trendline to exact leave-future-out forecast scores ####
+loess_scores = function(scores){
+  predict(loess(y ~ time, span = 0.95, data = data.frame(y = log(scores),
+                                                         time = seq_len(length(scores)))),
+          newdata = data.frame(time = seq_len(length(scores))))
+}
+
+#### Function for rolling evaluations with weighted variogram / DRPS scores ####
+roll_evaluation = function(object, 
+                           evaluation_seq, 
+                           n_samples, 
+                           n_cores){
+  # logged variogram evaluations
+  var_roll <- roll_eval_mvgam(object, 
+                              evaluation_seq = evaluation_seq,
+                              n_samples = n_samples, 
+                              n_cores = n_cores,
+                              fc_horizon = 12,
+                              score = 'variogram',
+                              log = TRUE)
+  
+  # logged DRPS evaluations (per series)
+  drps_roll <- roll_eval_mvgam(object, 
+                               evaluation_seq = evaluation_seq,
+                               n_samples = n_samples, 
+                               n_cores = n_cores,
+                               fc_horizon = 12,
+                               score = 'drps',
+                               log = TRUE)
+  
+  # Calculate summed DRPS scores per horizon
+  drps_sum_scores <- data.frame(score = rowSums(do.call(cbind, lapply(seq_along(drps_roll$series_evals), 
+                                                 function(series){
+                                                   drps_roll$series_evals[[series]]$all_scores[,1]
+                                                 }))),
+                                horizon = as.factor(var_roll$all_scores$eval_horizon))
+  # Variogram scores per horizon
+  var_scores <- data.frame(score = var_roll$all_scores$score,
+                           horizon = as.factor(var_roll$all_scores$eval_horizon))
+  # Equally-weighted ensemble scores per horizon
+  combn_scores <- data.frame(score = var_scores$score * drps_sum_scores$score,
+                             horizon = as.factor(var_roll$all_scores$eval_horizon))
+  return(list(drps_sum_scores = drps_sum_scores,
+              var_scores = var_scores,
+              combn_scores = combn_scores,
+              coverage_90 = drps_roll$interval_coverage))
+}
 
 #### Plot mintemp trends against residuals ####
 plot_mintemp_resids = function(object, series){
@@ -263,8 +385,7 @@ plot_mintemp_resids = function(object, series){
        ylim = lims,
        xaxt = 'n',
        xlab = '')
-  axis(1, at = seq(0, 336,
-                   by = 12), labels = seq(1995, 2023), cex.axis = 1)
+  time_axis()
   lincoefs <- vector(length = 500)
   for(i in 1:500){
     lines(object$resids[[series]][i,],
@@ -387,9 +508,9 @@ ndvi_retro_residual <- function(series, object, n_bins = 20,
        xaxt = 'n',
        bty = 'l')
   if(show_xlabs){
-    axis(side = 1, lwd = 2, cex.axis = 0.8, tck = -0.08)
+    axis(1)
   } else {
-    axis(side = 1, lwd = 2, labels = NA, tck = -0.08)
+    axis(1, labels = NA)
   }
   
   polygon(c(xs, rev(xs)), c(pad_cred[1,], rev(pad_cred[9,])),
@@ -425,8 +546,7 @@ plot_ndvi_resids = function(object, series){
        ylim = lims,
        xaxt = 'n',
        xlab = '')
-  axis(1, at = seq(0, 336,
-                   by = 12), labels = seq(1995, 2023), cex.axis = 1)
+  time_axis()
   lincoefs <- vector(length = 500)
   for(i in 1:500){
     lines(object$resids[[series]][i,],
@@ -531,7 +651,7 @@ plot_ndvi_contrast = function(object, series = 1,
   # a brown year to estimate a contrast
   
   # Create fake NDVI series with green summer
-  scenario_1 <- rep(0.75, 200)
+  scenario_1 <- rep(0.5, 200)
   
   # Set all other covariates to zero
   newdata <- data_train
@@ -550,12 +670,29 @@ plot_ndvi_contrast = function(object, series = 1,
   newdata$lag <- matrix(0:5, 200, 6, byrow = TRUE)
   
   # Generate posterior predictions for the new data
-  test <- exp(suppressWarnings(predict(object, newdata = newdata, type = 'link')))
+  Xp <- mvgam:::trend_Xp_matrix(newdata = newdata,
+                                trend_map = object$trend_map,
+                                series = 'all',
+                                mgcv_model = object$trend_mgcv_model)
+  trend_betas <- as.matrix(object, variable = 'trend_betas')
+  test <- matrix(NA, nrow = NROW(trend_betas), ncol = NROW(Xp))
+  for(i in 1:NROW(trend_betas)){
+    test[i,] <- exp(Xp %*% trend_betas[i, ])
+  }
+  #test <- exp(suppressWarnings(predict(object, newdata = newdata, type = 'link')))
   
   # Repeat for a brown year
-  scenario_2 <- rep(-0.75, 200)
+  scenario_2 <- rep(-0.5, 200)
   newdata$ndvi_ma12 <- scenario_2
-  test2 <- exp(suppressWarnings(predict(object, newdata = newdata,  type = 'link')))
+  Xp <- mvgam:::trend_Xp_matrix(newdata = newdata,
+                                trend_map = object$trend_map,
+                                series = 'all',
+                                mgcv_model = object$trend_mgcv_model)
+  test2 <- matrix(NA, nrow = NROW(trend_betas), ncol = NROW(Xp))
+  for(i in 1:NROW(trend_betas)){
+    test2[i,] <- exp(Xp %*% trend_betas[i, ])
+  }
+  #test2 <- exp(suppressWarnings(predict(object, newdata = newdata,  type = 'link')))
   
   contrast_distribution <- as.vector(test - test2)
   
@@ -663,7 +800,7 @@ plot_resids_time = function(object, series){
        ylab = '',
        xlim = c(0, NCOL(series_residuals)),
        ylim = range(cred, na.rm = TRUE))
-  pred_vals <- 1:NCOL(leftover)
+  pred_vals <- 1:NCOL(cred)
   polygon(c(pred_vals, rev(pred_vals)), c(cred[1,], rev(cred[9,])),
           col = c_light, border = NA)
   polygon(c(pred_vals, rev(pred_vals)), c(cred[2,], rev(cred[8,])),
@@ -799,7 +936,6 @@ plot_mod_qq = function(object, series){
        xlim = c(-3.25, 3.25),
        ylim = c(-3.25, 3.25),
        tck = -0.04)
-  box(bty = 'l', lwd = 2)
 
   polygon(c(pred_vals, rev(pred_vals)), c(cred[1,][complete.cases(cred[1,])],
                                           rev(cred[9,][complete.cases(cred[1,])])),
@@ -816,6 +952,7 @@ plot_mod_qq = function(object, series){
   lines(pred_vals, cred[5,][complete.cases(cred[1,])], col = c_dark, lwd = 1.5)
   qqline(cred[5,][complete.cases(cred[1,])], col = '#FFFFFF60', lwd = 2)
   qqline(cred[5,][complete.cases(cred[1,])], col = 'black', lwd = 1.5)
+  box(bty = 'l', lwd = 2)
 }
 
 #### Plot standardised trend estimates for two series together ####
@@ -872,7 +1009,7 @@ plot_trend_comp = function(object, series1, series2, hide_xlabels = FALSE){
 
   if(hide_xlabels){
     plot(1, type = "n", bty = 'L',
-         ylab = 'Posterior trends',
+         ylab = 'Latent states (z-scored)',
          xlab = '',
          xaxt = 'n',
          xlim = c(0, length(pred_vals)),
@@ -899,7 +1036,7 @@ plot_trend_comp = function(object, series1, series2, hide_xlabels = FALSE){
     lines(pred_vals, cred2[5,], col = adjustcolor(blues[5], alpha.f = 0.9), lwd = 2.5)
   } else {
     plot(1, type = "n", bty = 'L',
-         ylab = 'Posterior trends (standardised)',
+         ylab = 'Latent states (z-scored)',
          xlab = '',
          xaxt = 'n',
          xlim = c(0, length(pred_vals)),
@@ -924,14 +1061,13 @@ plot_trend_comp = function(object, series1, series2, hide_xlabels = FALSE){
     polygon(c(pred_vals, rev(pred_vals)), c(cred2[4,], rev(cred2[6,])),
             col = adjustcolor(blues[4], alpha.f = 0.8), border = NA)
     lines(pred_vals, cred2[5,], col = adjustcolor(blues[5], alpha.f = 0.9), lwd = 2.5)
-    axis(1, at = seq(0, 336,
-                     by = 12), labels = seq(1995, 2023), cex.axis = 1)
+    time_axis()
   }
 
 }
 
 #### Plot constrained forecasts and calculate individual series DRPS ####
-plot_fc_constained = function(fcs, series, newdata, ylim,
+plot_fc_constrained = function(fcs, series, newdata, ylim,
                               ylab, xlab, hide_xlabels = FALSE,
                               colours = 'reds',
                               return_forecasts = FALSE,
@@ -1150,11 +1286,8 @@ plot_fc_constained = function(fcs, series, newdata, ylim,
 }
 
 #### Plot VAR coefficients in a more interpretable manner; ####
-# a cell represents the effect of the column on the row, so cell
-# 3,6 represents the effect of species 6's trend at t-1 on species 3's
-# trend at t
 plot_var_coefs = function(object, filepath = 'Figures/VAR_betas.jpeg'){
-  coef_estimates <- MCMCvis::MCMCchains(object$model_output, 'beta_var')
+  coef_estimates <- MCMCvis::MCMCchains(object$model_output, 'A')
   
   plot_coef_hist = function(coef_distribution, main,
                             show_xlabs = TRUE,
@@ -1163,7 +1296,7 @@ plot_var_coefs = function(object, filepath = 'Figures/VAR_betas.jpeg'){
     coef_distribution[coef_distribution < -1.25] <- -1.25
     coef_distribution[coef_distribution > 1.25] <- 1.25
     hist_data <- hist(coef_distribution,
-                      breaks = seq(-1.25, 1.25, length.out = 100),
+                      breaks = seq(-1.25, 1.25, length.out = 75),
                       plot = F)
     
     xlimits <- 1.1 * c(-1 * max(abs(coef_distribution),
@@ -1180,7 +1313,7 @@ plot_var_coefs = function(object, filepath = 'Figures/VAR_betas.jpeg'){
          main = main)
     
     if(borders){
-      rect(xleft = -1, xright = 1, ybottom = -10, ytop = 10, col = 'grey80',
+      rect(xleft = -1, xright = 1, ybottom = -100, ytop = 100, col = 'grey80',
            border = NA)
     }
     
@@ -1223,7 +1356,8 @@ plot_var_coefs = function(object, filepath = 'Figures/VAR_betas.jpeg'){
                    linecol = 'black',
                    borders = x %in% seq(1, 81, by = 10))
     if(x %in% 1:9){
-      title(main = levels(data_all$series)[x], cex.main = 0.8, line = 0.1,
+      title(main = levels(data_all$series)[which(1:9 == x)], 
+            cex.main = 0.8, line = 0.1,
             xpd = NA)
     }
     
@@ -1237,6 +1371,103 @@ plot_var_coefs = function(object, filepath = 'Figures/VAR_betas.jpeg'){
   dev.off()
   
 }
+
+#### Plot VAR covariances in a more interpretable manner; ####
+plot_var_cors = function(object, filepath = 'Figures/VAR_cors.jpeg'){
+  
+  # Extract covariance estimates and convert to correlation matrices
+  cov_estimates <- MCMCvis::MCMCchains(object$model_output, 'Sigma')
+  cor_estimates <- matrix(NA, nrow = NROW(cov_estimates),
+                          ncol = NCOL(cov_estimates))
+  for(i in 1:NROW(cor_estimates)){
+    cor_estimates[i, ] <- as.vector(cov2cor(matrix(cov_estimates[i,],
+                                                   nrow = 9, ncol = 9)))
+  }
+  
+  
+  plot_coef_hist = function(coef_distribution, main,
+                            show_xlabs = TRUE,
+                            linecol = 'black',
+                            borders = FALSE){
+    coef_distribution[coef_distribution < -1] <- -1
+    coef_distribution[coef_distribution > 1] <- 1
+    hist_data <- hist(coef_distribution,
+                      breaks = seq(-1, 1, length.out = 100),
+                      plot = F)
+    
+    xlimits <- 1.1 * c(-1 * max(abs(coef_distribution),
+                                na.rm = TRUE), max(abs(coef_distribution),
+                                                   na.rm = TRUE))
+    ylimits <- range(hist_data$density)
+    
+    plot(1, type = "n", bty = 'n',
+         ylab = '',
+         xaxt = 'n',
+         yaxt = 'n',
+         xlim = c(-1, 1),
+         ylim = ylimits,
+         main = main)
+    
+    if(!borders){
+      line <- par(lwd = 0.4)
+      hist(coef_distribution, border = 'white',
+           breaks = hist_data$breaks,
+           freq = FALSE,
+           lwd = 0.5, col = "#8F2727", add = TRUE)
+      
+      hist_data$density[which(hist_data$breaks>= 0)] <- 0
+      plot(hist_data, freq = F, add = TRUE,
+           border = 'white',
+           col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5],
+           lwd = 0.5)
+      if(borders){
+        abline(v = 0, lwd = 1.5, col = 'grey80')
+      } else {
+        abline(v = 0, lwd = 1.5, col = 'white')
+      }
+      
+      abline(v = 0, lwd = 1.2, col = linecol)
+      if(show_xlabs){
+        axis(side = 1, at = seq(-1, 1, by = 0.25), 
+             labels = c(-1, NA, -0.5, NA, 0, NA, 0.5, NA, 1),
+             lwd = 1.2, cex.axis = 0.8, col = linecol, tck= -0.08)
+      } else {
+        axis(side = 1, at = seq(-1, 1, by = 0.25), lwd = 1.2, 
+             labels = NA, col = linecol, tck= -0.08)
+      }
+      
+    }
+    
+  }
+  
+  jpeg(filepath, width = 8, height = 5.5,
+       res = 300, units = 'in')
+  par(mgp=c(3,0.05,0), mar=c(0.9, 0, 0, 0),
+      oma = c(0,0,0.7,0))
+  layout(matrix(1:81, ncol = 9, nrow = 9))
+  for(x in 1:81){
+    plot_coef_hist(cor_estimates[,x], 
+                   main = '',
+                   show_xlabs = x == 9,
+                   linecol = 'black',
+                   borders = x %in% seq(1, 81, by = 10))
+    if(x %in% seq(1, 81, by = 9)){
+      title(main = levels(data_all$series)[which(seq(1, 81, by = 9) == x)], 
+            cex.main = 0.8, line = 0.1,
+            xpd = NA)
+    }
+    
+    if(x %in% 1:9){
+      title(ylab = levels(data_all$series)[which(1:9 == x)], 
+            cex.lab = 0.8, line = -1,
+            font.lab = 2)
+    }
+    
+  }
+  dev.off()
+  
+}
+
 
 #### Mintemp distributed lag plot ####
 plot_mintemp_conditional = function(object, series, xlabel = TRUE,
@@ -1264,12 +1495,21 @@ plot_mintemp_conditional = function(object, series, xlabel = TRUE,
   if(levels(data_all$series)[series] == 'PP'){
     newdata$weights_pp <- matrix(1, 12, 6)
   }
-  preds <- predict(object, newdata = newdata, type = 'link')
+  Xp <- mvgam:::trend_Xp_matrix(newdata = newdata,
+                                trend_map = object$trend_map,
+                                series = 'all',
+                                mgcv_model = object$trend_mgcv_model)
+  trend_betas <- as.matrix(object, variable = 'trend_betas')
+  preds <- matrix(NA, nrow = NROW(trend_betas), ncol = NROW(Xp))
+  for(i in 1:NROW(trend_betas)){
+    preds[i,] <- Xp %*% trend_betas[i, ]
+  }
   preds <- (preds - mean(preds, na.rm = TRUE)) / sd(preds, na.rm = TRUE)
-  probs <- c(0.05, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.95)
+  probs <- c(0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85)
   cred <- sapply(1:NCOL(preds),
                  function(n) quantile(preds[,n],
                                       probs = probs, na.rm = TRUE))
+  cred <- cred - mean(cred[5,])
   
   c_light <- c("#DCBCBC")
   c_light_highlight <- c("#C79999")
@@ -1324,39 +1564,45 @@ if(xlabel){
 }
 
 #### VAR impulse response plots ####
-# Calculate expected impulse variations when shocking each species
-# separately; take proportions of these over a horizon of 6 to 
-# calculate variance decompositions
-calculate_var_decomps = function(object){
-  beta_vars <- MCMCvis::MCMCchains(object$model_output, 'beta_var')
-  
-  var_decomps <- lapply(1:1000, function(x){
-    all_imps <- lapply(1:9, function(series){
-      imp_states <- rep(1, 9)
-      imp_states[series] <- 1 + log(3)
-      pulses <- iterate_var1(var_coefs = matrix(beta_vars[x,], 
-                                                nrow = 9, 
-                                                ncol = 9, 
-                                                byrow = TRUE),
-                             inits = imp_states)
-      pulses <- rbind(rep(1, 9), pulses)
-      abs(apply(pulses, 2, diff))
-    })
+# Calculate the forecast error variance decomposition, which is 
+# based upon the orthogonalised impulse response coefficient 
+# matrices Ψh and allow the user to analyse the contribution of 
+# variable j to the h-step forecast error variance of variable k. 
+# the result is a percentage figure
+calc_vardecomps = function(object){
+  beta_vars <- MCMCvis::MCMCchains(object$model_output, 'A')
+  sigmas <- MCMCvis::MCMCchains(object$model_output, 'Sigma')
+  all_decomps <- lapply(seq_len(NROW(beta_vars)), function(draw){
     
-    total_pulses <- Reduce('+', all_imps)
-    lapply(1:9, function(series){
-      all_imps[[series]] / total_pulses
-    })
+    # Get necessary VAR parameters into a simple list format
+    x <- list(K = 9,
+              A = matrix(beta_vars[draw,], 
+                         nrow = 9, 
+                         ncol = 9,
+                         byrow = TRUE),
+              Sigma = matrix(sigmas[draw,], 
+                             nrow = 9, 
+                             ncol = 9,
+                             byrow = TRUE),
+              p = 1)
+    
+    # Calculate the orthogonal variance decomposition
+    ortho_vardecomp(x, h = 12, orthog = TRUE)
     
   })
-  var_decomps
+  return(all_decomps)
 }
+
 
 # Calculate credible intervals of decompositions
 get_decomp_creds = function(var_decomps, series1 = 1, series2 = 1){
-  responses <- do.call(rbind, lapply(var_decomps, function(matrix){
-    matrix[[series]][, series2]
-  }))
+  
+  
+  responses <- do.call(rbind, lapply(seq_len(length(var_decomps)),
+                                     function(draw){
+                                       var_decomps[[draw]][[series1]][, series2]
+                                     }))
+
   probs = c(0.05, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.95)
   cred <- sapply(1:NCOL(responses),
                  function(n) quantile(responses[,n],
@@ -1364,39 +1610,204 @@ get_decomp_creds = function(var_decomps, series1 = 1, series2 = 1){
   cred
 }
 
-# Plot impulse responses
-iterate_var1 = function(var_coefs, inits){
-  states <- matrix(NA, nrow = 7, ncol = 9)
-  states[1,] <- inits
-  for(t in 2:7){
-    states[t,] <- var_coefs %*% (states[t-1,] + rnorm(9, 0, 0.1))
+# Function to compute Generalized Impulse Response functions
+# code modified from R code generously provided by Clinton Watkins:
+# https://www.clintonwatkins.com/post/2021-generalised-impulse-response-function-r/#:~:text=This%20function%20is%20a%20replacement,bootstrap%20confidence%20intervals%20for%20IRFs.
+gen_irf = function(x, h = 6, cumulative = TRUE, orthog = FALSE){
+  
+  spec_names <- species_names
+  impulse <- spec_names
+  response <- spec_names
+  
+  # Create arrays to hold calculations     
+  # [1:nlags, 1:nvariables, shocked variable ] 
+  IRF_o = array(data = 0, dim = c(h,x$K,x$K),
+                 dimnames = list(NULL,spec_names,spec_names))       
+  IRF_g = array(data = 0, dim = c(h,x$K,x$K),
+                 dimnames = list(NULL,spec_names,spec_names))
+  IRF_g1 = array(data = 0, dim = c(h,x$K,x$K))
+  
+  # Estimation of orthogonalised and generalised IRFs
+  if(orthog){
+    var_ma <- var_psi(x, h)
+  } else {
+    var_ma <- var_phi(x, h)
   }
-  states[2:7,]
+
+  sigma.u <- x$Sigma
+  P <- t(chol(sigma.u))
+  sig_jj <- diag(sigma.u)
+  
+  for (jj in 1:x$K){
+    indx_ <- matrix(0,x$K,1)
+    indx_[jj,1] <- 1
+    
+    for (kk in 1:h){  #kk counts the lag
+      IRF_o[kk, ,jj] <- var_ma[, ,kk]%*%P%*%indx_  # Peseran-Shin eqn 7 (OIRF)
+      IRF_g1[kk, ,jj] <- var_ma[, ,kk]%*%sigma.u%*%indx_
+      IRF_g[kk, ,jj] <- sig_jj[jj]^(-0.5)*IRF_g1[kk, ,jj]  # Peseran-Shin eqn 10 (GIRF)
+      
+    }
+  }
+  
+  if(orthog==TRUE){
+    irf <- IRF_o
+  } else if(orthog==FALSE) {
+    irf <- IRF_g
+  } else {
+    stop("\nError! Orthogonalised or generalised IRF?\n")
+  }
+  
+  idx <- length(impulse)
+  irs <- list()
+  for (ii in 1:idx) {
+    irs[[ii]] <- matrix(irf[1:(h), response, impulse[ii]], nrow = h)
+    colnames(irs[[ii]]) <- response
+    if (cumulative) {
+      if (length(response) > 1) 
+        irs[[ii]] <- apply(irs[[ii]], 2, cumsum)
+      if (length(response) == 1) {
+        tmp <- matrix(cumsum(irs[[ii]]))
+        colnames(tmp) <- response
+        irs[[ii]] <- tmp
+      }
+    }
+  }
+  names(irs) <- impulse
+  result <- irs
+  return(result)
+  
 }
 
-plot_impulse_responses = function(object, series, filepath){
-  beta_vars <- MCMCvis::MCMCchains(object$model_output, 'beta_var')
+# Convert a VAR A matrix to its moving average representation
+var_phi = function(x, h = 10){
+  h <- abs(as.integer(h))
+  K <- x$K
+  p <- x$p
+  A <- as.array(x$A)
+  if(h >= p){
+    As <- array(0, dim = c(K, K, h + 1))
+    for(i in (p + 1):(h + 1)){
+      As[, , i] <- matrix(0, nrow = K, ncol = K)
+    }
+  } else {
+    As <- array(0, dim = c(K, K, p))
+  }
+  As[, , 1] <- A
+  Phi <- array(0, dim=c(K, K, h + 1))
+  Phi[, ,1] <- diag(K)
+  Phi[, , 2] <- Phi[, , 1] %*% As[, , 1]
+  if (h > 1) {
+    for (i in 3:(h + 1)) {
+      tmp1 <- Phi[, , 1] %*% As[, , i-1]
+      tmp2 <- matrix(0, nrow = K, ncol = K)
+      idx <- (i - 2):1
+      for (j in 1:(i - 2)) {
+        tmp2 <- tmp2 + Phi[, , j+1] %*% As[, , idx[j]]
+      }
+      Phi[, , i] <- tmp1 + tmp2
+    }
+  }
+  return(Phi)
+}
+
+# Convert a VAR A matrix to its orthogonalised moving average representation
+var_psi = function(x, h=10){
+    h <- abs(as.integer(h))
+    Phi <- var_phi(x, h = h)
+    Psi <- array(0, dim=dim(Phi))
+    sigma.u <- x$Sigma
+    P <- t(chol(sigma.u))
+    dim3 <- dim(Phi)[3]
+    for(i in 1:dim3){
+      Psi[, , i] <- Phi[, , i] %*% P
+    }
+    return(Psi)
+  }
+
+# Forecast error decomposition
+var_fecov = function(x, h) {
+  sigma.u <- x$Sigma
+  Sigma.yh <- array(NA, dim = c(x$K, x$K, h))
+  Sigma.yh[, , 1] <- sigma.u
+  Phi <- var_phi(x, h = h)
+  if (h > 1) {
+    for (i in 2:h) {
+      temp <- matrix(0, nrow = x$K, ncol = x$K)
+      for (j in 2:i) {
+        temp <- temp + Phi[, , j] %*% sigma.u %*% t(Phi[, , j])
+      }
+      Sigma.yh[, , i] <- temp + Sigma.yh[, , 1]
+    }
+  }
+  return(Sigma.yh)
+}
+
+ortho_vardecomp = function(x, h = 10, ...){
+
+    h <- abs(as.integer(h))
+    K <- x$K
+    p <- x$p
+    ynames <- spec_names
+    msey <- var_fecov(x, h = h)
+    Psi <- var_psi(x, h = h)
+    mse <- matrix(NA, nrow = h, ncol = K)
+    Omega <- array(0, dim = c(h, K, K))
+    for(i in 1 : h){
+      mse[i, ] <- diag(msey[, , i])
+      temp <- matrix(0, K, K)
+      for(l in 1 : K){
+        for(m in 1 : K){
+          for(j in 1 : i){
+            temp[l, m] <- temp[l, m] + Psi[l , m, j]^2
+          }
+        }
+      }
+      temp <- temp / mse[i, ]
+      for(j in 1 : K){
+        Omega[i, ,j] <- temp[j, ]
+      }
+    }
+    result <- list()
+    for(i in 1 : K){
+      result[[i]] <- matrix(Omega[, , i], nrow = h, ncol = K)
+      colnames(result[[i]]) <- ynames
+    }
+    names(result) <- ynames
+    return(result)
+  }
+
+# Calculate impulse responses for each posterior draw
+calc_irfs = function(object){
+  beta_vars <- MCMCvis::MCMCchains(object$model_output, 'A')
+  sigmas <- MCMCvis::MCMCchains(object$model_output, 'Sigma')
+  all_irfs <- lapply(seq_len(NROW(beta_vars)), function(draw){
+    
+    # Get necessary VAR parameters into a simple list format
+    x <- list(K = 9,
+              A = matrix(beta_vars[draw,], 
+                         nrow = 9, 
+                         ncol = 9,
+                         byrow = TRUE),
+              Sigma = matrix(sigmas[draw,], 
+                             nrow = 9, 
+                             ncol = 9,
+                             byrow = TRUE),
+              p = 1)
+    
+    # Calculate the orthogonal irf for 12 steps ahead, initialising 
+    # the shocks in a way that they can be directly compared
+    gen_irf(x, h = 12, cumulative = FALSE, orthog = FALSE)
+    
+  })
+  return(all_irfs)
+}
+
+plot_impulse_responses = function(all_irfs, series, filepath){
   
-  impulse_responses <- lapply(1:1000, function(x){
-    # Base prediction for 6 months ahead (all innovations are zero)
-    base_preds <- iterate_var1(var_coefs = matrix(beta_vars[x,], 
-                                                  nrow = 9, 
-                                                  ncol = 9, 
-                                                  byrow = TRUE),
-                               inits = rep(1, 9))
-    
-    # Impulse response prediction (innovation for one species is three more captures
-    # than expected from the GAM model)
-    imp_states <- rep(1, 9)
-    imp_states[series] <- 1 + log(3)
-    imp_preds <- iterate_var1(var_coefs = matrix(beta_vars[x,], 
-                                                 nrow = 9, 
-                                                 ncol = 9, 
-                                                 byrow = TRUE),
-                              inits = imp_states)
-    
-    # Calculate deviations
-    imp_preds - base_preds
+  # Extract IRFs for the specific series
+  impulse_responses <- lapply(seq_along(all_irfs), function(j){
+    all_irfs[[j]][series]
   })
   
   # Plot imp responses for all species apart from the impacted one
@@ -1414,7 +1825,7 @@ plot_impulse_responses = function(object, series, filepath){
   layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
   for(x in 1:9){
     if(x == series){
-      plot(x = 1:6, y = 1:6, type = "n", bty = 'L',
+      plot(x = 1:12, y = 1:12, type = "n", bty = 'L',
            ylim = c(-2, 2),
            yaxt = 'n',
            xaxt = 'n',
@@ -1423,20 +1834,20 @@ plot_impulse_responses = function(object, series, filepath){
       abline(h = 0, lwd = 2.5)
       box(bty = 'l', lwd = 2)
     } else {
-      responses <- do.call(rbind, lapply(impulse_responses, function(matrix){
-        matrix[,x]
+      responses <- do.call(rbind, lapply(seq_along(impulse_responses), function(j){
+        impulse_responses[[j]][[1]][,x]
       }))
       
-      probs = c(0.05, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.95)
+      probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
       cred <- sapply(1:NCOL(responses),
                      function(n) quantile(responses[,n],
                                           probs = probs, na.rm = TRUE))
-      pred_vals <- 1:6
+      pred_vals <- 1:12
       plot(1, type = "n", bty = 'L',
            xlab = '',
            xaxt = 'n',
            ylab = '',
-           xlim = c(1, 6),
+           xlim = c(1, 12),
            ylim = c(-1.1 * max(abs(cred)), 1.1 * max(abs(cred))))
       polygon(c(pred_vals, rev(pred_vals)), c(cred[1,], rev(cred[9,])),
               col = c_light, border = NA)
@@ -1465,7 +1876,7 @@ plot_impulse_responses = function(object, series, filepath){
             xpd = NA, line = 2.25)
     }
     if(x == 8){
-      title(xlab = 'Forecast horizon (months)', xpd = NA, line = 2.25)
+      title(xlab = 'Forecast horizon (lunar months)', xpd = NA, line = 2.25)
     }
   }
   dev.off()
