@@ -1,7 +1,7 @@
-# Forecasting rodent community regime transitions with Dynamic Generalized Additive Models
+# Forecasting rodent population dynamics with dynamic Generalized Additive Models
 
 ## Summary
-This repository contains R code to extract data and replicate analyses in the manuscript titled *Forecasting rodent population dynamics and community transitions with dynamic nonlinear models* (Clark et al 2023, currently on hosted on *biorxiv* at the following DOI: [https://doi.org/10.32942/X2TS34](https://doi.org/10.32942/X2TS34))
+This repository contains R code to extract data and replicate analyses in the manuscript titled *Forecasting rodent population dynamics with dynamic Generalized Additive Models* (currently in review; a preprint of a previous version is hosted on *biorxiv* at the following DOI: [https://doi.org/10.32942/X2TS34](https://doi.org/10.32942/X2TS34))
 
 ## Required R libraries
 `portalcasting`  
