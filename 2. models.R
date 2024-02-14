@@ -1,8 +1,9 @@
-#### 2. Formulate and fit Dynamic models ####
 library(dplyr)
 library(cmdstanr)
 library(forecast)
+#remotes::install_github('nicholasjclark/mvgam')
 library(mvgam)
+setwd("C:/Users/Nick/Google Drive/Academic Work Folder/Ecological forecasting/mv_portalcasting/rodent_evaluation_ms")
 
 # Load the pre-prepared modelling data
 load('data/rodents_data_tsobjects.rda')
@@ -228,7 +229,7 @@ save(bench1_all, file = 'Outputs/bench1_all.rda')
 bench2_all <- update(bench2, data = data_all, samples = 1600)
 save(bench2_all, file = 'Outputs/bench2_all.rda')
 
-#### Compute exact leave-future-out cross-validation for each model ####
+# Compute exact leave-future-out cross-validation for each model
 # across a set of evenly-spaced evaluation periods. When this is finished, we will
 # have 6 total exact cross-validations for comparing models
 evaluation_seq <- round(seq.int(75, 273, length.out = 6), 0)[1:5]

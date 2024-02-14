@@ -1,6 +1,7 @@
 #### Analyse candidate models and produce model-based visualisations ####
 library(mvgam)
 library(scoringRules)
+setwd("C:/Users/Nick/Google Drive/Academic Work Folder/Ecological forecasting/mv_portalcasting/rodent_evaluation_ms")
 
 # Load the pre-prepared modelling data and visualisation functions
 load('data/rodents_data_tsobjects.rda')
