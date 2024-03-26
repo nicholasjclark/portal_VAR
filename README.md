@@ -1,7 +1,7 @@
-# Forecasting rodent population dynamics with dynamic Generalized Additive Models
+# Multi-species dependencies improve forecasts of population dynamics in a long-term monitoring study
 
 ## Summary
-This repository contains R code to extract data and replicate analyses in the manuscript titled *Forecasting rodent population dynamics with dynamic Generalized Additive Models* (currently in review; a preprint of a previous version is hosted on *biorxiv* at the following DOI: [https://doi.org/10.32942/X2TS34](https://doi.org/10.32942/X2TS34))
+This repository contains R code to extract data and replicate analyses in the manuscript titled *Multi-species dependencies improve forecasts of population dynamics in a long-term monitoring study* (currently in review; a preprint of a previous version is hosted on *biorxiv* at the following DOI: [https://doi.org/10.32942/X2TS34](https://doi.org/10.32942/X2TS34))
 
 ## Required R libraries
 `portalcasting`  
