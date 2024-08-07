@@ -1,9 +1,9 @@
 # Beyond single-species forecasts: leveraging multispecies models to improve predictions and navigate the dynamics of ecological predictability
 
-<img src="Figures/model_definition.png" width = 620 align="right" alt="Dynamic Generalized Additive Model for forecasting rodent capture time series"/>
+<img src="Figures/model_definition.png" width = 620 alt="Dynamic Generalized Additive Model for forecasting rodent capture time series"/>
 
 ## Summary
-This repository contains R code to extract data and replicate analyses in the manuscript titled *Multi-species dependencies improve forecasts of population dynamics in a long-term monitoring study* (currently in review; a preprint of a previous version is hosted on *biorxiv* at the following DOI: [https://doi.org/10.32942/X2TS34](https://doi.org/10.32942/X2TS34))
+This repository contains R code to extract data and replicate analyses in the manuscript titled *Beyond single-species forecasts: leveraging multispecies models to improve predictions and navigate the dynamics of ecological predictability* (currently in review; a preprint of a previous version is hosted on *biorxiv* at the following DOI: [https://doi.org/10.32942/X2TS34](https://doi.org/10.32942/X2TS34))
 
 ## Required R libraries
 `portalcasting`  
