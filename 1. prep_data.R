@@ -4,6 +4,7 @@ library(mgcv)
 library(dplyr)
 
 # Load the most recent rodents survey table for control plots
+setwd("C:/Users/Nick/Google Drive/Academic Work Folder/Ecological forecasting/mv_portalcasting/rodent_evaluation_ms")
 rodents_table <- read.csv('data/rodents_data.csv', as.is = T)
 
 # Calculate means and sds of covariates for later unscaled plotting
@@ -35,13 +36,39 @@ rodents_table %>%
                 maxtemp = as.vector(scale(maxtemp))) %>%
   dplyr::mutate(ndvi_ma12 = zoo::rollmean(ndvi, k = 12, align = 'right',
                                              na.pad = TRUE)) %>%
+  # # Keep the first observation if multiple taken in the same month
+  # dplyr::arrange(year, month) %>%
+  # dplyr::group_by(month, year) %>%
+  # dplyr::slice_head(n = 1) %>%
   tidyr::pivot_longer(cols = colnames(rodents_table)[4:24],
                       names_to = 'series', values_to = 'y') %>%
   dplyr::select(y, series, month, year, 
                 newmoonnumber, mintemp:ndvi_ma12) %>%
   dplyr::mutate(time = newmoonnumber - (min(newmoonnumber) - 1))-> model_dat
 
-# Check that dimensions match
+# # Add missing sampling time points
+# model_dat %>%
+#   dplyr::left_join(data.frame(year = lubridate::year(seq(as.Date("1996/1/1"),
+#                                       as.Date(tail(rodents_table$date, 1)), by = "month")),
+#            month = lubridate::month(seq(as.Date("1996/1/1"),
+#                                        as.Date(tail(rodents_table$date, 1)), by = "month")),
+#            time = 1:length(seq(as.Date("1996/1/1"),
+#                                as.Date(tail(rodents_table$date, 1)), by = "month")))) -> model_dat
+# 
+# model_dat %>%
+#   dplyr::full_join(expand.grid(time = min(model_dat$time):max(model_dat$time),
+#                                series = unique(model_dat$series))) %>%
+#   dplyr::ungroup() %>%
+#   dplyr::select(-year, -month) -> model_dat
+# 
+# model_dat %>%
+#   dplyr::left_join(data.frame(year = lubridate::year(seq(as.Date("1996/1/1"),
+#                                                          as.Date(tail(rodents_table$date, 1)), by = "month")),
+#                               month = lubridate::month(seq(as.Date("1996/1/1"),
+#                                                            as.Date(tail(rodents_table$date, 1)), by = "month")),
+#                               time = 1:length(seq(as.Date("1996/1/1"),
+#                                                   as.Date(tail(rodents_table$date, 1)), by = "month")))) -> model_dat
+
 (max(model_dat$time) * length(unique(model_dat$series))) == NROW(model_dat)
 
 
@@ -60,6 +87,7 @@ model_dat %>%
   dplyr::filter(series != 'total') %>%
   dplyr::mutate(series = as.factor(series)) %>%
   dplyr::arrange(time, series) -> model_dat
+
 
 # Feature engineering
 #1. Distributed lag matrices for environmental covariates
@@ -184,6 +212,7 @@ weights_pe[!(model_dat$series == 'PE'), ] <- 0
 weights_pf[!(model_dat$series == 'PF'), ] <- 0
 weights_pp[!(model_dat$series == 'PP'), ] <- 0
 weights_rm[!(model_dat$series == 'RM'), ] <- 0
+
 
 # Create a list to store the full dataset, including lag matrices and 
 # moving averages for the environmental covariates 
