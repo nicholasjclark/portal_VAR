@@ -1,4 +1,4 @@
-# Multi-species dependencies improve forecasts of population dynamics in a long-term monitoring study
+# Beyond single-species forecasts: leveraging multispecies models to improve predictions and navigate the dynamics of ecological predictability
 
 ## Summary
 This repository contains R code to extract data and replicate analyses in the manuscript titled *Multi-species dependencies improve forecasts of population dynamics in a long-term monitoring study* (currently in review; a preprint of a previous version is hosted on *biorxiv* at the following DOI: [https://doi.org/10.32942/X2TS34](https://doi.org/10.32942/X2TS34))
