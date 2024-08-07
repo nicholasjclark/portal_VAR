@@ -1,5 +1,612 @@
 #### Checking functions for bespoke model evaluation ####
 
+#### Function to use exact leave-future-out cross-validation to evaluate models
+# on a small subset of evaluation splits (5 splits) ####
+lfo_exact = function(object, data, last_train, fc_horizon = 12,
+                     stab_metrics = TRUE, model_name = 'GAMVAR', ...){
+  
+  # Ensure data and object will work with newer versions of mvgam
+  data <- mvgam:::validate_series_time(data,
+                                       trend_model = attr(object$model_data, 
+                                                          'trend_model'))
+  object$share_obs_params <- FALSE
+  
+  # Split data into training and testing at the appropriate time point
+  data_split <- mvgam:::cv_split(data, last_train = last_train,
+                                 fc_horizon = fc_horizon)
+  
+  # Update the model using the new data splits
+  split_mod <- update(object,
+                      data = data_split$data_train,
+                      newdata = data_split$data_test,
+                      lfo = !stab_metrics,
+                      ...)
+  
+  # Extract forecast distributions
+  fc <- forecast(split_mod)
+  
+  # Calculate forecast scores
+  fc_score_energy <- data.frame(score = 
+                                  score(fc, score = 'energy',
+                                        log = TRUE)$all_series$score[1:fc_horizon])
+  fc_score_energy$eval_timepoint <- last_train
+  
+  fc_score_var <- data.frame(score = score(fc, score = 'variogram', 
+                                           log = TRUE)$all_series$score[1:fc_horizon])
+  fc_score_var$eval_timepoint <- last_train
+  
+  cmbn_score <- fc_score_var
+  cmbn_score$score <- log(fc_score_var$score * fc_score_energy$score)
+  cmbn_score$score_type <- 'combination'
+  
+  if(stab_metrics){
+    # Calculate stability and forecast composition metrics
+    fc_metrics <- calc_metrics(object = split_mod,
+                               data_test = data_split$data_test,
+                               model_name = model_name)
+  } else {
+    fc_metrics <- NULL
+  }
+
+  # Return scores
+  return(list(energy_score = fc_score_energy, 
+              var_score = fc_score_var,
+              cmbn_score = cmbn_score,
+              fc_metrics = fc_metrics))
+}
+
+#### Functions to plot uncertainty contributions ####
+plot_unc_props = function(unc_props){
+  ggplot(unc_props, aes(x = horizon, 
+                        y = `Proportion of variance`, 
+                        fill = Process)) +
+    geom_area() +
+    scale_fill_viridis(discrete = TRUE) +
+    facet_wrap(~ series) +
+    labs(x = 'Forecast horizon (lunar months)',
+         y = 'Proportion of forecast variance') +
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(expand = c(0, 0)) +
+    theme_bw() +
+    theme(legend.title = element_blank())
+}
+
+plot_sp_unc_time = function(fc_uncertainty_props,
+                            series){
+  s_name <- levels(data_all$series)[series]
+  unc_props <- fc_uncertainty_props %>%
+    dplyr::filter(series == s_name,
+                  horizon < 13)
+  train_labs <- paste0('T = ', 
+                       unique(unc_props$end_train))
+  names(train_labs) <- unique(unc_props$end_train)
+  ggplot(unc_props, aes(x = horizon, 
+                        y = `Proportion of variance`, 
+                        fill = Process)) +
+    geom_area() +
+    scale_fill_viridis(discrete = TRUE) +
+    facet_wrap(~ end_train,
+               labeller = 
+                 labeller(end_train = train_labs)) +
+    labs(x = 'Forecast horizon (lunar months)',
+         y = 'Proportion of forecast variance',
+         title = species_names[series]) +
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(expand = c(0, 0)) +
+    theme_minimal() +
+    theme(plot.title = element_text(face = "italic"),
+          legend.title = element_blank(),
+          strip.text = element_text(face = "italic"),
+          panel.grid.minor = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.border = element_blank(),
+          axis.line = element_line(color = 'black'),
+          axis.ticks = element_line()) +
+    geom_hline(aes(yintercept=-Inf)) + 
+    geom_vline(aes(xintercept=-Inf))
+}
+
+#### Wrapper function to calculate all stability / forecast composition metrics ####
+calc_metrics = function(object, data_test, model_name){
+  
+  # Last training time
+  end_train <- max(object$obs_data$time)
+  
+  # Calculate stability metrics and their uncertainties
+  stab_metrics <- stability_metrics(object) %>%
+    dplyr::mutate(end_train = end_train,
+                  model_name = model_name)
+  
+  # Extract trend parameter estimates in the correct format
+  trend_estimates <- trend_pars(object, data_test)
+  
+  # Calculate proportional contributions to forecast uncertainty
+  
+  # 1. No process error but including uncertainty in the NDVI
+  # GAM params (ignoring other effects)
+  coef_fix <- (1:length(coef(object$trend_mgcv_model)))[
+    !grepl('ndvi', names(coef(object$trend_mgcv_model)))]
+  gam_ndvi <- gamvar_unc(object,
+                         data_test,
+                         trend_pars = trend_estimates,
+                         coefs_fix = coef_fix,
+                         trend_fix = TRUE,
+                         process_error = FALSE)
+  
+  # 2. Now including all params in the GAM
+  gam_all <- gamvar_unc(object,
+                        data_test,
+                        trend_pars = trend_estimates,
+                        trend_fix = TRUE,
+                        process_error = FALSE)
+  
+  # 3. Now including uncertainty in AR / VAR params
+  gamvar_noerror <- gamvar_unc(object,
+                               data_test,
+                               trend_pars = trend_estimates,
+                               trend_fix = FALSE,
+                               process_error = FALSE)
+  
+  # 4. Now including process error
+  gamvar_all <- gamvar_unc(object,
+                           data_test,
+                           trend_pars = trend_estimates,
+                           trend_fix = FALSE,
+                           process_error = TRUE)
+  
+  # Calculate proportions for all series
+  unc_props <- do.call(rbind, 
+                       lapply(seq_len(nlevels(object$obs_data$series)),
+                              function(i){
+                                varmat <- rbind(gam_ndvi[,i],
+                                                gam_all[,i],
+                                                gamvar_noerror[,i],
+                                                gamvar_all[,i])
+                                
+                                plot_propvar(varmat = varmat,
+                                             series = i,
+                                             varnames = c('NDVI effect',
+                                                          'Mintemp smooth',
+                                                          'Interactions',
+                                                          'Process error'))                         
+                                
+                              }))
+  
+  unc_props %>%
+    dplyr::group_by(series, horizon) %>%
+    dplyr::mutate(n = sum(prop_var)) %>%
+    dplyr::mutate(`Proportion of variance` = prop_var / n) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(series = levels(modvar$obs_data$series)[series]) %>%
+    dplyr::mutate(Process = sub('_', ' ', process)) %>%
+    dplyr::mutate(Process = factor(Process, levels = c(
+      'Process error',
+      'Interactions',
+      'Mintemp smooth',
+      'NDVI effect')))  %>%
+    dplyr::mutate(end_train = end_train,
+                  model_name = model_name) -> unc_props
+  
+  return(list(unc_props = unc_props,
+              stab_metrics = stab_metrics))
+}
+
+#### Function to calculate, and optionally plot, 
+# proportions of forecast variance ####
+plot_propvar = function(varmat,
+                        varnames,
+                        series,
+                        legend = TRUE,
+                        draw = FALSE){
+  
+  # Tidy the varmat
+  varmat_norm <- apply(varmat, 2, function(x) {x / max(x)})
+  do.call(rbind, lapply(rev(1:NROW(varmat)), function(i){
+    if(i > 1){
+      data.frame(prop_var = pmax(0, varmat_norm[i,] - varmat_norm[i - 1]),
+                 process = gsub(' ', '_', varnames)[i],
+                 series = series,
+                 horizon = 1:NCOL(varmat_norm))
+    } else {
+      data.frame(prop_var = varmat_norm[i,],
+                 process = gsub(' ', '_', varnames)[i],
+                 series = series,
+                 horizon = 1:NCOL(varmat_norm))
+    }
+    
+  })) -> out
+  
+  if(!draw){
+    return(out)
+  } else {
+    pred_rel <- apply(varmat, 2, function(x) {x / max(x)})
+    plot(1:NCOL(pred_rel),
+         pred_rel[1,],
+         ylim = c(0,1),
+         type = 'n',
+         bty = 'l',
+         ylab = "Proportion of variance",
+         xlab = "Forecast horizon",
+         xaxs = "i",
+         yaxs = "i")
+    cols <- c('black',
+              viridis::viridis(NROW(varmat))[2:NROW(varmat)])
+    
+    ciEnvelope(1:NCOL(pred_rel),
+               rep(0, ncol(pred_rel)),
+               pred_rel[1,],
+               col = cols[1])
+    ciEnvelope(1:NCOL(pred_rel),
+               pred_rel[1,],
+               pred_rel[2,],
+               col = cols[2])
+    if(NROW(varmat) > 2){
+      ciEnvelope(1:NCOL(pred_rel),
+                 pred_rel[2,],
+                 pred_rel[3,],
+                 col = cols[3])
+    }
+    if(NROW(varmat) > 3){
+      ciEnvelope(1:NCOL(pred_rel),
+                 pred_rel[3,],
+                 pred_rel[4,],
+                 col = cols[4])
+    }
+    if(NROW(varmat) > 4){
+      ciEnvelope(1:NCOL(pred_rel),
+                 pred_rel[4,],
+                 pred_rel[5,],
+                 col = cols[5])
+    }
+    if(legend){
+      legend("topright",
+             legend = rev(varnames),
+             col = rev(cols),
+             lty = 1, lwd = 6, bg = 'white',
+             box.col = 'white')
+    }
+    
+    box(bty = 'l', lwd = 2)
+    return(out)
+  }
+}
+
+#### Function to extract posterior estimates of trend parameters
+# for use in mvgam internals ####
+trend_pars = function(object, data_test){
+  
+  # Forecast horizon
+  data_test <- mvgam:::validate_series_time(data_test, 
+                                            name = 'data_test',
+                                            trend_model = attr(object$model_data, 'trend_model'))
+  data_train <- mvgam:::validate_series_time(object$obs_data, 
+                                            name = 'obs_data',
+                                            trend_model = attr(object$model_data, 'trend_model'))
+  
+  h <- max(data_test$index..time..index - max(data_train$index..time..index))
+  ending_time <- max(data_train$index..time..index)
+  
+  # Trend parameters
+  trend_pars <- mvgam:::extract_trend_pars(object,
+                                           keep_all_estimates = FALSE,
+                                           ending_time = ending_time)
+  return(list(h = h,
+              trend_pars = trend_pars))
+}
+
+#### Function to compute variance of forecasts under specific conditions
+# i.e. using only single draw for the process or setting particular
+# GAM coefs to zero ####
+gamvar_unc = function(object,
+                      data_test,
+                      trend_pars,
+                      driver_fix = TRUE,
+                      coefs_fix = NULL,
+                      trend_fix = TRUE,
+                      process_error = TRUE){
+  
+  # Validate training and test data
+  data_test <- mvgam:::validate_series_time(data_test, 
+                                            name = 'data_test',
+                                            trend_model = attr(object$model_data, 'trend_model'))
+  data_train <- mvgam:::validate_series_time(object$obs_data, 
+                                             name = 'obs_data',
+                                             trend_model = attr(object$model_data, 'trend_model'))
+  
+  # Create trend Xp matrix
+  make_trend_Xp = function(object, data_train, data_test){
+    n_series <- nlevels(object$obs_data$series)
+    Xp_trend <- mvgam:::trend_Xp_matrix(newdata = mvgam:::sort_data(data_test),
+                                        trend_map = object$trend_map,
+                                        mgcv_model = object$trend_mgcv_model)
+    Xp_trend_last <- mvgam:::trend_Xp_matrix(newdata = data_train,
+                                             trend_map = object$trend_map,
+                                             mgcv_model = object$trend_mgcv_model)
+    
+    # Ensure the last three observed values are used, in case the obs_data
+    # was not supplied in order
+    data.frame(time = data_train$index..time..index,
+               series = object$obs_data$series,
+               row_id = 1:length(data_train$index..time..index)) %>%
+      dplyr::arrange(time, series) %>%
+      dplyr::pull(row_id) -> sorted_inds
+    
+    linpred_order <- vector(length = 3 * n_series)
+    last_rows <- tail(sort(sorted_inds), 3 * n_series)
+    for(i in seq_along(last_rows)){
+      linpred_order[i] <- which(sorted_inds == last_rows[i])
+    }
+    
+    # Deal with any offsets
+    if(!all(attr(Xp_trend_last, 'model.offset') == 0)){
+      offset_vec <- attr(Xp_trend_last, 'model.offset')
+      offset_last <- offset_vec[linpred_order]
+      offset_last[is.na(offset_last)] <- 0
+      full_offset <- c(offset_last, attr(Xp_trend, 'model.offset'))
+    } else {
+      full_offset <- 0
+    }
+    
+    # Bind the last 3 linpred rows with the forecast linpred rows
+    Xp_trend <- rbind(Xp_trend_last[linpred_order, , drop = FALSE],
+                      Xp_trend)
+    attr(Xp_trend, 'model.offset') <- full_offset
+    
+    return(Xp_trend)
+  }
+  
+  # Posterior GAM betas
+  betas_trend <- mvgam:::mcmc_chains(object$model_output, 'b_trend')
+  
+  if(!is.null(coefs_fix)){
+    # Fix specified coefs to zero so particular GAM terms can
+    # be dropped from the predictions
+    betas_trend[,coefs_fix] <- 0
+  }
+  
+  # Propagate the trend for 250 draws of betas, using the fixed
+  # seed to ensure the VAR process is the same in each draw
+  gam_draws <- lapply(seq_len(min(250, NROW(betas_trend))), 
+                                 function(i){
+    # Sample the driver estimates if specified
+    if(driver_fix){
+      Xp_trend <- make_trend_Xp(object, data_train, data_test)
+    } else {
+      # This assumes data_test is a list of possible test data sets
+      ind <- sample(1:length(data_test), 1)
+      Xp_trend <- make_trend_Xp(object, data_train, data_test[[ind]])
+    }
+    propagate_trends(h = trend_pars$h,
+                     trend_pars = trend_pars$trend_pars,
+                     data_test = data_test,
+                     Xp_trend = Xp_trend,
+                     betas_trend = betas_trend[i,],
+                     seed = trend_fix,
+                     samp_index = ifelse(trend_fix, 1, i),
+                     process_error = process_error)
+  })
+  
+  # Calculate variances of predictions across horizons for each series
+  n_series <- nlevels(object$obs_data$series)
+  gam_vars <- matrix(NA, nrow = NROW(gam_draws[[1]]),
+                     ncol = n_series)
+  for(i in 1:n_series){
+    gam_vars[,i] <- apply(do.call(cbind,
+                                  lapply(gam_draws, `[`,,i)), 1, var)
+  }
+  
+  return(gam_vars)
+}
+
+
+#### Function to propagate dynamic processes while allowing for certain
+# components to be ignored or fixed ####
+propagate_trends = function(h,
+                            trend_pars,
+                            data_test,
+                            Xp_trend = NULL,
+                            betas_trend = NULL,
+                            samp_index = 1,
+                            seed = FALSE,
+                            process_error = TRUE){
+  
+  if(!'last_lvs' %in% names(trend_pars)){
+    trend_pars$last_lvs <- trend_pars$last_trends
+  }
+  
+  # One realisation of trend parameters
+  trend_pars <- mvgam:::extract_general_trend_pars(trend_pars = trend_pars,
+                                                   samp_index = samp_index)
+  
+  # Reconstruct the A and Sigma matrices
+  if('A' %in% names(trend_pars)){
+    Amat <- matrix(trend_pars$A, nrow = length(trend_pars$last_lvs),
+                   ncol = length(trend_pars$last_lvs),
+                   byrow = TRUE)
+    ar1 <- rlang::missing_arg()
+  } else if('ar1' %in% names(trend_pars)){
+    ar1 <- trend_pars$ar1
+    Amat <- rlang::missing_arg()
+  } else {
+    ar1 <- rep(1, length(trend_pars$last_lvs))
+    Amat <- rlang::missing_arg()
+  }
+  
+  if('ar2' %in% names(trend_pars)){
+    ar2 <- trend_pars$ar2
+  } else {
+    ar2 <- rep(0, length(trend_pars$last_lvs))
+  }
+  
+  if('ar3' %in% names(trend_pars)){
+    ar3 <- trend_pars$ar3
+  } else {
+    ar3 <- rep(0, length(trend_pars$last_lvs))
+  }
+  
+  if('Sigma' %in% names(trend_pars)){
+    Sigmamat <- matrix(trend_pars$Sigma, nrow = length(trend_pars$last_lvs),
+                       ncol = length(trend_pars$last_lvs),
+                       byrow = TRUE)
+  } else if('sigma' %in% names(trend_pars)){
+    Sigmamat <- matrix(0, nrow = length(trend_pars$last_lvs),
+                       ncol = length(trend_pars$last_lvs),
+                       byrow = TRUE)
+    diag(Sigmamat) <- trend_pars$sigma
+  } else {
+    Sigmamat <- matrix(0, nrow = length(trend_pars$last_lvs),
+                       ncol = length(trend_pars$last_lvs),
+                       byrow = TRUE)
+    diag(Sigmamat) <- 1 / trend_pars$tau
+  }
+  
+  if(!process_error){
+    Sigmamat <- matrix(0, ncol = ncol(Sigmamat),
+                       nrow = nrow(Sigmamat))
+    diag(Sigmamat) <- .Machine$double.eps
+  }
+  
+  
+  # Reconstruct the last trend matrix
+  last_trendmat <- do.call(cbind,(lapply(trend_pars$last_lvs,
+                                         function(x) tail(x, 3))))
+  
+  # If this is a moving average model, reconstruct theta matrix and
+  # last error matrix
+  if('theta' %in% names(trend_pars)){
+    thetamat <- matrix(trend_pars$theta,
+                       nrow = length(trend_pars$last_lvs),
+                       ncol = length(trend_pars$last_lvs),
+                       byrow = TRUE)
+    errormat <- rbind(rep(0, length(trend_pars$last_lvs)),
+                      rep(0, length(trend_pars$last_lvs)),
+                      tail(trend_pars$error, length(trend_pars$last_lvs)))
+    
+  } else {
+    thetamat <- rlang::missing_arg()
+    errormat <- rlang::missing_arg()
+  }
+  
+  # Prep VARMA parameters
+  varma_params <- mvgam:::prep_varma_params(A = Amat,
+                                            ar1 = ar1,
+                                            ar2 = ar2,
+                                            ar3 = ar3,
+                                            Sigma = Sigmamat,
+                                            last_trends = last_trendmat,
+                                            last_errors = errormat,
+                                            theta = thetamat,
+                                            Xp_trend = Xp_trend,
+                                            betas_trend = betas_trend,
+                                            h = h)
+  
+  # Simulate one realisation of VAR process for h timesteps ahead
+  if(seed){
+    set.seed(1)
+  } else {
+    set.seed(NULL)
+  }
+  trend_realisation <- mvgam:::sim_varma(A = varma_params$A,
+                                         A2 = varma_params$A2,
+                                         A3 = varma_params$A3,
+                                         drift = varma_params$drift,
+                                         theta = varma_params$theta,
+                                         Sigma = varma_params$Sigma,
+                                         last_trends = varma_params$last_trends,
+                                         last_errors = varma_params$last_errors,
+                                         Xp_trend = varma_params$Xp_trend,
+                                         betas_trend = varma_params$betas_trend,
+                                         h = varma_params$h)
+  
+  return(trend_realisation)
+}
+
+
+#### Function to compute measures of stability
+# These measures of stability assess how systems respond to
+# environmental fluctuations, not how variable the systems are in general ####
+stability_metrics = function(object){
+  
+  # Take posterior draws of the interaction matrix
+  B_post <- as.matrix(object, variable = 'A', regex = TRUE)
+  
+  # Take posterior draws of Sigma
+  Sigma_post <- as.matrix(object, variable = 'Sigma', regex = TRUE)
+  
+  metrics <- do.call(rbind, lapply(
+    seq_len(min(1000, NROW(B_post))),
+    function(i){
+      
+      B <- matrix(B_post[i,],
+                  nrow = nlevels(object$obs_data$series),
+                  ncol = nlevels(object$obs_data$series))
+      p <- dim(B)[1]
+      
+      # If we want to get the variance of the stationary distribution (Sigma_inf)
+      Sigma <- matrix(Sigma_post[i,],
+                      nrow = nlevels(object$obs_data$series),
+                      ncol = nlevels(object$obs_data$series))
+      vecS_inf <- solve(diag(p * p) - kronecker(B, B)) %*% as.vector(Sigma)
+      Sigma_inf <- matrix(vecS_inf, nrow = p)
+
+      # The difference in volume between Sigma_inf and Sigma is:
+      # det(Sigma_inf - Sigma) = det(Sigma_inf) * det(B) ^ 2
+      # according to Ives et al 2003 (eqn 24)
+      
+      # We can take partial derivatives to determine which elements of 
+      # Sigma_inf contribute
+      # most to rates of change in the proportion of Sigma_inf that is due to 
+      # unmodelled environmental variation (process error)
+      int_env <- det(Sigma_inf) * t(solve(Sigma_inf))
+      
+      # Proportion of interspecific covariance to
+      # to overall environmental variation contribution (i.e. how important are
+      # correlated errors for controlling the shape of the stationary forecast
+      # distribution?)
+      dat <- data.frame(intersp_env_cont = mean(abs(int_env[lower.tri(int_env)])) /
+        (mean(abs(diag(int_env))) + mean(abs(int_env[lower.tri(int_env)]))))
+      
+      # Proportion of volume of Sigma_inf attributable to species interactions,
+      # measuring the degree to which species interactions increase
+      # the variance of the stationary distribution (Sigma_inf) relative
+      # to the variance of the process error (Sigma)
+      # lower values = more stability
+      dat$sp_prop = abs(det(B)) ^ 2
+      
+      # Ives et al 2003 suggest to scale this by the number of series for more direct
+      # comparisons among different studies
+      dat$sp_prop_adj <- abs(det(B)) ^ (2 / p)
+      
+      # Sensitivity of the species interaction proportion to particular
+      # interactions is also calculated using partial derivatives 
+      # (note the use of 2 here because we squared det(B) in the above eqn)
+      int_sens <- 2 * det(B) * t(solve(B))
+      
+      # Proportion of interspecific contributions to
+      # to overall interaction contribution
+      dat$intersp_interact_cont <- mean(abs(int_sens[lower.tri(int_sens)])) /
+        (mean(abs(diag(int_sens))) + mean(abs(int_sens[lower.tri(int_sens)])))
+      
+      # Reactivity, measuring the degree to which the system moves
+      # away from a stable equilibrium following a perturbation
+      # values > 0 suggest the system is reactive, whereby a
+      # perturbation of the system in one period can be amplified in the next period
+      # Following Neubert et al 2009 Ecology (Detecting reactivity)
+      dat$reactivity <- log(max(svd(B)$d))
+      
+      # Return rate of transition distribution to the stationary distribution
+      # Asymptotic return rate of the mean
+      # lower values = more stability
+      dat$mean_returnrate <- max(abs(eigen(B)$values))
+      
+      # Asymptotic return rate of the variance
+      # lower values = more stability
+      dat$var_returnrate <- max(abs(eigen(B %x% B)$values))
+      dat
+    }))
+  return(metrics)
+}
+
 #### Generic function to plot a line histogram ####
 # Most of this was adapted from Michael Betancourt's case study code:
 # https://betanalpha.github.io/assets/case_studies/taylor_models.html
@@ -281,45 +888,6 @@ evaluate_variogram = function(object, newdata, bound = 196,
                              truth = log(truths[series,] + 0.001))[,1]
   }))) 
   vg_scores * drps_scores
-}
-
-#### Function to use exact leave-future-out cross-validation to evaluate models
-# on a small subset of evaluation splits (5 splits) ####
-lfo_exact = function(object, data, last_train, fc_horizon = 12){
-  
-  # Split data into training and testing at the appropriate time point
-  data_split <- mvgam:::cv_split(data, last_train = last_train,
-                                 fc_horizon = fc_horizon)
-  
-  # Update the model using the new data splits
-  split_mod <- mvgam:::lfo_update(object,
-                                  data = data_split$data_train,
-                                  newdata = data_split$data_test,
-                                  lfo = TRUE,
-                                  burnin = 300,
-                                  samples = 500)
-  
-  # Extract forecast distributions
-  fc <- forecast(split_mod)
-  
-  # Calculate forecast scores
-  fc_score_energy <- data.frame(score = 
-                                  score(fc, score = 'energy',
-                                        log = TRUE)$all_series$score[1:fc_horizon])
-  fc_score_energy$eval_timepoint <- last_train
-  
-  fc_score_var <- data.frame(score = score(fc, score = 'variogram', 
-                        log = TRUE)$all_series$score[1:fc_horizon])
-  fc_score_var$eval_timepoint <- last_train
-  
-  cmbn_score <- fc_score_var
-  cmbn_score$score <- log(fc_score_var$score * fc_score_energy$score)
-  cmbn_score$score_type <- 'combination'
-  
-  # Return scores
-  return(list(energy_score = fc_score_energy, 
-              var_score = fc_score_var,
-              cmbn_score = cmbn_score))
 }
 
 #### Function to fit a LOESS trendline to exact leave-future-out forecast scores ####
@@ -1748,7 +2316,7 @@ ortho_vardecomp = function(x, h = 10, ...){
     h <- abs(as.integer(h))
     K <- x$K
     p <- x$p
-    ynames <- spec_names
+    ynames <- species_names
     msey <- var_fecov(x, h = h)
     Psi <- var_psi(x, h = h)
     mse <- matrix(NA, nrow = h, ncol = K)
