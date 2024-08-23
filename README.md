@@ -1,4 +1,4 @@
-# Beyond single-species forecasts: leveraging multispecies models to improve predictions and navigate the dynamics of ecological predictability
+# Beyond single-species models: leveraging multispecies forecasts to navigate the dynamics of ecological predictability
 
 <img src="Figures/model_definition.png" width = 620 alt="Dynamic Generalized Additive Model for forecasting rodent capture time series"/>
 
