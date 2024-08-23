@@ -1,7 +1,6 @@
 #### Analyse candidate models and produce model-based visualisations ####
 library(mvgam)
 library(scoringRules)
-setwd("C:/Users/Nick/Google Drive/Academic Work Folder/Ecological forecasting/mv_portalcasting/rodent_evaluation_ms")
 
 # Load the pre-prepared modelling data and visualisation functions
 load('data/rodents_data_tsobjects.rda')
@@ -9,15 +8,38 @@ source('Functions/checking_functions.R')
 
 # Load all relevant models
 load('Outputs/bench1.rda')
+load('Outputs/bench1.2.rda')
 load('Outputs/bench2.rda')
 load('Outputs/modvar.rda')
 load('Outputs/bench1_all.rda')
+load('Outputs/bench1.2_all.rda')
 load('Outputs/bench2_all.rda')
 load('Outputs/modvar_all.rda')
-load('Outputs/modvar.rda')
+
+#### Comparisons among models using in-sample and out-of-sample
+# fit metrics ####
+# In-sample 'hypothesis test' using LOO
+loo_compare(modvar_all, bench1_all, bench1.2_all, bench2_all)
+loo1 <- loo(modvar_all, save_psis = TRUE)
+plot(loo1)
+# GAM-VAR performs best
 
 # Load the exact leave-future-out cross-validation results and plot them
 load('Outputs/roll_evaluations.rda')
+
+# bench1 and the non-hierarchical bench1.2 are fairly similar in
+# performance overall
+bench1_tot <- unlist(lapply(1:5, function(x){
+  sum(exp(bench1_roll[[x]]$cmbn_score$score), na.rm = TRUE)
+}))
+bench1.2_tot <- unlist(lapply(1:5, function(x){
+  sum(exp(bench1.2_roll[[x]]$cmbn_score$score), na.rm = TRUE)
+}))
+length(which(bench1_tot < bench1.2_tot))
+
+# We therefore only make plots for the three main models 
+# (modvar, bench1, bench2) to improve clarity of plots
+scores_array <- array(NA, dim = c(3, 6, 12))
 tot_scores <- matrix(NA, nrow = 3, ncol = 6)
 jpeg('Figures/variogram_scores.jpg', width = 6.25, height = 4.25,
      res = 300, units = 'in')
@@ -52,6 +74,11 @@ for(i in 1:6){
   tot_scores[1,i] <- sum(bench1_scores, na.rm = TRUE)
   tot_scores[2,i] <- sum(bench2_scores, na.rm = TRUE)
   tot_scores[3,i] <- sum(modvar_scores, na.rm = TRUE)
+  
+  # Save score data into an array for storing
+  scores_array[1,i,] <- log(bench1_scores)
+  scores_array[2,i,] <- log(bench2_scores)
+  scores_array[3,i,] <- log(modvar_scores)
   
   # Create loess smooth lines
   bench1_lines <- loess_scores(bench1_scores)
@@ -121,17 +148,75 @@ mtext('Weighted variogram score', side = 2, outer = TRUE,
       line = 0.3, cex = 0.9)
 dev.off()
 
-# GAM-VAR provides lowest overall scores in four of six cv folds
+# Get the score data into a data.frame format
+reshape2::melt(scores_array,
+               varnames = c('model', 'end_train',
+                            'horizon'),
+               value.name = 'score') %>%
+  dplyr::mutate(model = dplyr::case_when(
+    model == 1 ~ 'AR',
+    model == 2 ~ 'GAM-AR',
+    model == 3 ~ 'GAM-VAR'
+  ),
+  end_train = dplyr::case_when(
+    end_train == 1 ~ 75,
+    end_train == 2 ~ 115,
+    end_train == 3 ~ 154,
+    end_train == 4 ~ 194,
+    end_train == 5 ~ 233,
+    end_train == 6 ~ 273)) -> scores_df
+save(scores_df, file = 'Outputs/scores_df.rda')
+
+# GAM-VAR (row 3) provides lowest overall scores in four of six cv folds
 apply(tot_scores, 2, which.min)
 
 # GAM-VAR is superior
+
+# Look at a few unconstrained forecasts and calculate univariate
+# Discrete Rank Probability Scores
+plot(bench1, 'forecast', series = 1, newdata = data_test)
+plot(bench2, 'forecast', series = 1, newdata = data_test)
+plot(modvar, 'forecast', series = 1, newdata = data_test)
+
+plot(bench1, 'forecast', series = 2, newdata = data_test)
+plot(bench2, 'forecast', series = 2, newdata = data_test)
+plot(modvar, 'forecast', series = 2, newdata = data_test)
+
+plot(bench1, 'forecast', series = 3, newdata = data_test)
+plot(bench2, 'forecast', series = 3, newdata = data_test)
+plot(modvar, 'forecast', series = 3, newdata = data_test)
+
+plot(bench1, 'forecast', series = 4, newdata = data_test)
+plot(bench2, 'forecast', series = 4, newdata = data_test)
+plot(modvar, 'forecast', series = 4, newdata = data_test)
+
+plot(bench1, 'forecast', series = 5, newdata = data_test)
+plot(bench2, 'forecast', series = 5, newdata = data_test)
+plot(modvar, 'forecast', series = 5, newdata = data_test)
+
+plot(bench1, 'forecast', series = 6, newdata = data_test)
+plot(bench2, 'forecast', series = 6, newdata = data_test)
+plot(modvar, 'forecast', series = 6, newdata = data_test)
+
+plot(bench1, 'forecast', series = 7, newdata = data_test)
+plot(bench2, 'forecast', series = 7, newdata = data_test)
+plot(modvar, 'forecast', series = 7, newdata = data_test)
+
+plot(bench1, 'forecast', series = 8, newdata = data_test)
+plot(bench2, 'forecast', series = 8, newdata = data_test)
+plot(modvar, 'forecast', series = 8, newdata = data_test)
+
+plot(bench1, 'forecast', series = 9, newdata = data_test)
+plot(bench2, 'forecast', series = 9, newdata = data_test)
+plot(modvar, 'forecast', series = 9, newdata = data_test)
+
 # Inspect process error estimates for the various models and compare predictions
 jpeg('Figures/trend_sigmas.jpeg', width = 6.25, height = 4.25,
      res = 300, units = 'in')
 par(mar=c(2, 2, 1, 1),
     oma = c(1.25, 0, 0, 0))
 modvar_all_sigmas <- MCMCvis::MCMCchains(modvar$model_output,
-                                     'Sigma')
+                                         'Sigma')
 names_org <- expand.grid(as.character(1:9),
                          as.character(1:9))
 
@@ -174,7 +259,7 @@ for(x in 1:9){
                             length(break_seq)),
                  line_col = "#8F2727",
                  poly_col = scales::alpha("#8F2727",
-                               0.35))
+                                          0.35))
   plot_line_hist(s = bench2_sigmas, 
                  min_val = min(break_seq),
                  max_val = max(break_seq),
@@ -182,7 +267,7 @@ for(x in 1:9){
                             length(break_seq)),
                  line_col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5],
                  poly_col = scales::alpha(RColorBrewer::brewer.pal(n = 5, 'Blues')[5],
-                                     0.35))
+                                          0.35))
   plot_line_hist(s = modvar_sigmas, 
                  min_val = min(break_seq),
                  max_val = max(break_seq),
@@ -191,7 +276,7 @@ for(x in 1:9){
                  line_col = 'black',
                  poly_col = scales::alpha("black",
                                           0.35))
-
+  
   if(x > 6 ){
     axis(side = 1, lwd = 2, cex.axis = 0.8, tck= -0.08)
   } else {
@@ -207,46 +292,253 @@ for(x in 1:9){
 }
 dev.off()
 
-
-# Look at a few unconstrained forecasts and calculate univariate
-# Discrete Rank Probability Scores
-plot(bench1, 'forecast', series = 1, newdata = data_test)
-plot(bench2, 'forecast', series = 1, newdata = data_test)
-plot(modvar, 'forecast', series = 1, newdata = data_test)
-
-plot(bench1, 'forecast', series = 2, newdata = data_test)
-plot(bench2, 'forecast', series = 2, newdata = data_test)
-plot(modvar, 'forecast', series = 2, newdata = data_test)
-
-plot(bench1, 'forecast', series = 3, newdata = data_test)
-plot(bench2, 'forecast', series = 3, newdata = data_test)
-plot(modvar, 'forecast', series = 3, newdata = data_test)
-
-plot(bench1, 'forecast', series = 4, newdata = data_test)
-plot(bench2, 'forecast', series = 4, newdata = data_test)
-plot(modvar, 'forecast', series = 4, newdata = data_test)
-
-plot(bench1, 'forecast', series = 5, newdata = data_test)
-plot(bench2, 'forecast', series = 5, newdata = data_test)
-plot(modvar, 'forecast', series = 5, newdata = data_test)
-
-plot(bench1, 'forecast', series = 6, newdata = data_test)
-plot(bench2, 'forecast', series = 6, newdata = data_test)
-plot(modvar, 'forecast', series = 6, newdata = data_test)
-
-plot(bench1, 'forecast', series = 7, newdata = data_test)
-plot(bench2, 'forecast', series = 7, newdata = data_test)
-plot(modvar, 'forecast', series = 7, newdata = data_test)
-
-plot(bench1, 'forecast', series = 8, newdata = data_test)
-plot(bench2, 'forecast', series = 8, newdata = data_test)
-plot(modvar, 'forecast', series = 8, newdata = data_test)
-
-plot(bench1, 'forecast', series = 9, newdata = data_test)
-plot(bench2, 'forecast', series = 9, newdata = data_test)
-plot(modvar, 'forecast', series = 9, newdata = data_test)
-
 #### Analyse and evaluate the GAM-VAR model ####
+# Inspect variation in stability estimates
+all_metrics <- purrr::map(modvar_roll, 'fc_metrics')
+fc_uncertainty_props <- do.call(rbind.data.frame, 
+                                purrr::map(all_metrics, 'unc_props')) %>%
+  dplyr::bind_rows(modvar_metrics$unc_props)
+dplyr::glimpse(fc_uncertainty_props)
+
+plot_sp_unc_time(fc_uncertainty_props, series = 1)
+ggsave('figures/DM_unc_prop.jpg',
+       units = 'in', width = 7, height = 5)
+plot_sp_unc_time(fc_uncertainty_props, series = 5)
+ggsave('figures/PB_unc_prop.jpg',
+       units = 'in', width = 7, height = 5)
+plot_sp_unc_time(fc_uncertainty_props, series = 8)
+ggsave('figures/PP_unc_prop.jpg',
+       units = 'in', width = 7, height = 5)
+
+stab_metrics <- do.call(rbind.data.frame, 
+                                purrr::map(all_metrics, 'stab_metrics')) %>%
+  dplyr::bind_rows(modvar_metrics$stab_metrics)
+dplyr::glimpse(stab_metrics)
+
+library(ggbeeswarm)
+p1 <- ggplot(stab_metrics, aes(y = reactivity, 
+                         x = as.factor(end_train))) +
+  ggbeeswarm::geom_quasirandom(shape = 21, size = 0.5, 
+                               dodge.width = .9, 
+                               color = "black",
+                               alpha = .1,
+                               show.legend = F) +
+  geom_violin(position = position_dodge(width = 0.9),
+              fill = 'grey30',
+              alpha = 0.2, draw_quantiles = TRUE, trim = TRUE,
+              scale = 'width',
+              color = NA) +
+  geom_boxplot(notch = TRUE,  
+               outlier.size = -1, 
+               color = "black",
+               lwd = 0.8, 
+               alpha = 0.7) +
+  theme_bw() +
+  labs(x = '',
+       y = expression(log(sigma[1](A))),
+       title = 'Reactivity to perturbations') +
+  theme(legend.position = 'none',
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        axis.ticks = element_line(),
+        plot.title = element_text(size = 11))
+
+p2 <- ggplot(stab_metrics, aes(y = sp_prop_adj, 
+                               x = as.factor(end_train))) +
+  ggbeeswarm::geom_quasirandom(shape = 21, size = 0.5, 
+                               dodge.width = .9, 
+                               color = "black",
+                               alpha = .1,
+                               show.legend = F) +
+  geom_violin(position = position_dodge(width = 0.9),
+              fill = 'grey30',
+              alpha = 0.2, draw_quantiles = TRUE, trim = TRUE,
+              scale = 'width',
+              color = NA) +
+  geom_boxplot(notch = TRUE,  
+               outlier.size = -1, 
+               color = "black",
+               lwd = 0.8, 
+               alpha = 0.7) +
+  scale_y_continuous(limits = c(0.45, 1)) +
+  theme_bw() +
+  labs(x = '',
+       y = expression(det(A)^{2/p}),
+       title = "% stability due to species' interactions") +
+  theme(legend.position = 'none',
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        axis.ticks = element_line(),
+        plot.title = element_text(size = 11))
+
+fc_uncertainty_props %>%
+  dplyr::filter(horizon < 7,
+                process == 'Process_error') -> perror_dat
+
+p3 <- ggplot(perror_dat, aes(y = `Proportion of variance`, 
+                         x = as.factor(end_train))) +
+  ggbeeswarm::geom_quasirandom(shape = 21, size = 0.5, 
+                               dodge.width = .9, 
+                               color = "black",
+                               alpha = .1,
+                               show.legend = F) +
+  geom_violin(position = position_dodge(width = 0.9),
+              fill = 'grey30',
+              alpha = 0.2, draw_quantiles = TRUE, trim = TRUE,
+              scale = 'width',
+              color = NA) +
+  geom_boxplot(notch = TRUE,  
+               outlier.size = -1, 
+               color = "black",
+               lwd = 0.8, 
+               alpha = 0.7) +
+  theme_bw() +
+  labs(x = 'Last training time (T)',
+       y = expression(Var(Sigma[t+1:t+6])/Var(X[t+1:t+6])),
+       title = expression('% uncertainty due to process error')) +
+  theme(legend.position = 'none',
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        axis.ticks = element_line(),
+        plot.title = element_text(size = 11))
+
+p4 <- ggplot(stab_metrics, aes(y = intersp_interact_cont, 
+                               x = as.factor(end_train))) +
+  ggbeeswarm::geom_quasirandom(shape = 21, size = 0.5, 
+                               dodge.width = .9, 
+                               color = "black",
+                               alpha = .1,
+                               show.legend = F) +
+  geom_violin(position = position_dodge(width = 0.9),
+              fill = 'grey30',
+              alpha = 0.2, draw_quantiles = TRUE, trim = TRUE,
+              scale = 'width',
+              color = NA) +
+  geom_boxplot(notch = TRUE,  
+               outlier.size = -1, 
+               color = "black",
+               lwd = 0.8, 
+               alpha = 0.7) +
+  theme_bw() +
+  scale_y_continuous(limits = c(0, 0.28)) +
+  labs(x = 'Last training time (T)',
+       y = expression(abs(i != j)~'for'~2 %*% det(A) %*% A^{-1}),
+       title = expression('Sensitivity to interspecific interactions')) +
+  theme(legend.position = 'none',
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        axis.ticks = element_line(),
+        plot.title = element_text(size = 11))
+
+library(patchwork)
+p1 + p2 + p3 + p4 + 
+  plot_layout(ncol = 2)
+ggsave('figures/stability_overtime.jpg',
+       units = 'in', width = 7, height = 5)
+
+# Dirichlet regression to understand uncertainty components across species
+# and their relationships with metrics of community stability
+fc_uncertainty_props %>%
+  dplyr::filter(horizon == 12) %>%
+  dplyr::left_join(stab_metrics %>%
+                     dplyr::select(-model_name) %>%
+                     dplyr::group_by(end_train) %>%
+                     # Compute posterior mean estimate for reactivity
+                     # and other metrics
+                     dplyr::summarise_all(mean)) %>%
+  dplyr::mutate(proportion = `Proportion of variance`) %>%
+  # No zeros allowed in Dirichlet regression
+  dplyr::mutate(proportion = pmax(0.000001, proportion)) %>%
+  dplyr::select(proportion, series, process, reactivity,
+                var_returnrate) %>%
+  tidyr::pivot_wider(id_cols = c(series, reactivity,
+                                 var_returnrate), 
+                     names_from = process,
+                      values_from = 'proportion') %>%
+  # Re-normalize
+  dplyr::rowwise() %>%
+  dplyr::mutate(sum = sum(Process_error,
+                          Interactions, 
+                          Mintemp_smooth,
+                          NDVI_effect)) %>%
+  dplyr::mutate(Process_error = Process_error / sum,
+                Interactions = Interactions / sum,
+                Mintemp_smooth = Mintemp_smooth / sum,
+                NDVI_effect = NDVI_effect / sum) -> props_mod_dat
+
+# Return-rates don't vary much, so we only focus on reactivity
+# (which does show quite a lot of variation through time)
+library(brms)
+fit <- brm(bind(Process_error, Interactions, 
+                Mintemp_smooth, NDVI_effect) ~ series +  
+             s(reactivity, by = series, k = 4), 
+           data = props_mod_dat, family = dirichlet(),
+           backend = 'cmdstanr', cores = 4)
+summary(fit)
+plot(conditional_effects(fit, categorical = TRUE),
+     plot = FALSE)[[2]] +
+  theme_bw() +
+  labs(x = 'Reactivity',
+       y = 'Proportion of forecast variance') +
+  scale_y_continuous(limits = c(0, 1)) +
+  theme_minimal() +
+  scale_fill_viridis(discrete = TRUE,
+                     labels = c('Process_error' = 'Process error',
+                                'Mintemp_smooth' = 'Mintemp smooth',
+                                'NDVI_effect' = 'NDVI effect')) +
+  scale_colour_viridis(discrete = TRUE,
+                       labels = c('Process_error' = 'Process error',
+                                  'Mintemp_smooth' = 'Mintemp smooth',
+                                  'NDVI_effect' = 'NDVI effect')) +
+  theme(legend.title = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        axis.ticks = element_line())
+ggsave('figures/reactivity_uncprops_avg.jpg',
+       units = 'in', width = 4.75, height = 3.25)
+
+conditions <- data.frame(series = unique(props_mod_dat$series))
+mylabels <- species_names
+names(mylabels) <- as.character(1:9)
+
+plot(conditional_effects(fit, conditions = conditions,
+                         categorical = TRUE),
+     plot = FALSE,
+     facet_args = list(labeller = labeller(cond__ = mylabels)))[[2]] +
+  theme_minimal() +
+  scale_fill_viridis(discrete = TRUE,
+                     labels = c('Process_error' = 'Process error',
+                                'Mintemp_smooth' = 'Mintemp smooth',
+                                'NDVI_effect' = 'NDVI effect')) +
+  scale_colour_viridis(discrete = TRUE,
+                       labels = c('Process_error' = 'Process error',
+                                  'Mintemp_smooth' = 'Mintemp smooth',
+                                  'NDVI_effect' = 'NDVI effect')) +
+  labs(x = 'Reactivity',
+       y = 'Proportion of forecast variance') +
+  scale_y_continuous(limits = c(0, 1)) +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(face = "italic"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line(color = 'black'),
+        axis.ticks = element_line()) +
+  geom_hline(aes(yintercept=-Inf)) + 
+  geom_vline(aes(xintercept=-Inf))
+ggsave('figures/reactivity_uncprops_byspecies.jpg',
+       units = 'in', width = 6.75, height = 4.25)
+
 # Plot residuals for all series to look for any unmodelled 
 # systematic variation
 jpeg('Figures/resids_time.jpeg', width = 6.25, height = 4.25,
@@ -396,6 +688,25 @@ for(x in 1:9){
 }
 dev.off()
 
+# Now for the no-pooling example
+jpeg('Figures/NDVI_contrasts_nopool.jpeg', width = 6.25, height = 4.25,
+     res = 300, units = 'in')
+par(mar=c(2, 2, 1, 1),
+    oma = c(1.25, 0, 0, 0))
+layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
+for(x in 1:9){
+  plot_ndvi_contrast(object = bench1.2_all, series = x,
+                     xlimits = c(-6, 6),
+                     xlabel = FALSE,
+                     show_xlabs = x > 6)
+  title(main = bquote(italic(.(species_names[x]))), cex.main = 1, line = 0.35,
+        xpd = NA)
+  if(x == 8){
+    title(xlab = 'Expected change in captures with higher NDVI', xpd = NA, line = 2.25)
+  }
+}
+dev.off()
+
 # Plot mintemp conditional curves
 jpeg('Figures/mintemp_conditionals.jpeg', width = 6.25, height = 4.25,
      res = 300, units = 'in')
@@ -404,6 +715,23 @@ par(mar=c(1.5, 1.5, 1, 1),
 layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
 for(x in 1:9){
   plot_mintemp_conditional(object = modvar_all, series = x,
+                           xlabel = x > 6,
+                           ylabel = x %in% c(1,4,7))
+  if(x == 4){
+    title(ylab = 'Conditional minimum temperature effect (scaled)',
+          xpd = NA, line = 2.25)
+  }
+}
+dev.off()
+
+# Plot mintemp conditional curves
+jpeg('Figures/mintemp_conditionals_nopool.jpeg', width = 6.25, height = 4.25,
+     res = 300, units = 'in')
+par(mar=c(1.5, 1.5, 1, 1),
+    oma = c(1.75, 1.75, 0, 0))
+layout(matrix(1:9, ncol = 3, nrow = 3, byrow = TRUE))
+for(x in 1:9){
+  plot_mintemp_conditional(object = bench1.2_all, series = x,
                            xlabel = x > 6,
                            ylabel = x %in% c(1,4,7))
   if(x == 4){
