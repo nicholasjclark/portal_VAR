@@ -3,7 +3,7 @@
 <img src="Figures/model_definition.png" width = 620 alt="Dynamic Generalized Additive Model for forecasting rodent capture time series"/>
 
 ## Summary
-This repository contains R code to extract data and replicate analyses in the manuscript titled *Beyond single-species forecasts: leveraging multispecies models to improve predictions and navigate the dynamics of ecological predictability* (currently in review; a preprint of a previous version is hosted on *biorxiv* at the following DOI: [https://doi.org/10.32942/X2TS34](https://doi.org/10.32942/X2TS34))
+This repository contains R code to extract data and replicate analyses in the manuscript titled *Beyond single-species models: leveraging multispecies forecasts to navigate the dynamics of ecological predictability* (currently in review; a preprint of a previous version is hosted on *biorxiv* at the following DOI: [https://doi.org/10.32942/X2TS34](https://doi.org/10.32942/X2TS34)). This work shows how to build and interrogate multivariate Dynamic Generalized Additive Models (DGAMs) that can simultaneously learn useful multispecies dependencies and shared environmental effects, while also producing reliable probabilistic forecasts (the core model of the paper is presented in its full mathematical form above).
 
 ## Required R libraries
 `portalcasting`  
