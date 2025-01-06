@@ -1,3 +1,5 @@
+#### R script originally prepared by Nicholas J Clark (nicholas.j.clark1214@gmail.com) ####
+
 #### Checking functions for bespoke model evaluation ####
 
 #### Function to use exact leave-future-out cross-validation to evaluate models
