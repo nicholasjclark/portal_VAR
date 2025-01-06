@@ -1,7 +1,6 @@
 library(dplyr)
 library(cmdstanr)
 library(forecast)
-#remotes::install_github('nicholasjclark/mvgam')
 library(mvgam)
 
 # Load the pre-prepared modelling data
@@ -18,43 +17,47 @@ plot_mvgam_series(data = data_train, newdata = data_test, series = 8)
 # Prior simulation for a baseline version of the GAM-VAR model; note that there will
 # likely be many warnings as the predictions from spline prior models could be 
 # extremely large
-mod1_prior <- mvgam(formula = y ~ -1,
-                    # Species-level hierarchical slopes of NDVI
-                    # Note we use 'trend' here in place of 'series' to specify
-                    # the grouping factor. This is because mvgam will allow us to 
-                    # fit models where multiple time series share the same latent
-                    # process model, so it is possible that the number of groups 
-                    # in 'trend' will be fewer than the number of groups in 
-                    # 'series'. In this case each unique time series will have its
-                    # own dynamic process, but the effect of NDVI will be estimated
-                    # jointly
-                    trend_formula = ~ s(ndvi_ma12, trend, bs = 're') - 1,
-                    data = data_train,
-                    # Poisson observation model
-                    family = poisson(),
-                    # AR1 dynamics for the process model; note that this process
-                    # does not have to be centred about zero, so it can capture
-                    # variation in series-level intercepts without us needing to 
-                    # explicitly include varying intercept terms
-                    trend_model = 'AR1',
-                    burnin = 300,
-                    samples = 300,
-                    prior_simulation = TRUE)
+mod1_prior <- mvgam(
+  formula = y ~ -1,
+  # Species-level hierarchical slopes of NDVI
+  # Note we use 'trend' here in place of 'series' to specify
+  # the grouping factor. This is because mvgam will allow us to 
+  # fit models where multiple time series share the same latent
+  # process model, so it is possible that the number of groups 
+  # in 'trend' will be fewer than the number of groups in 
+  # 'series'. In this case each unique time series will have its
+  # own dynamic process, but the effect of NDVI will be estimated
+  # jointly
+  trend_formula = ~ s(ndvi_ma12, trend, bs = 're') - 1,
+  data = data_train,
+  # Poisson observation model
+  family = poisson(),
+  # AR1 dynamics for the process model; note that this process
+  # does not have to be centred about zero, so it can capture
+  # variation in series-level intercepts without us needing to 
+  # explicitly include varying intercept terms
+  trend_model = 'AR1',
+  burnin = 300,
+  samples = 300,
+  prior_simulation = TRUE
+)
 
 # Plot the prior for the random intercepts and random NDVI slopes, on the log scale
 plot(mod1_prior, 're', trend_effects = TRUE)
 
 # These are reasonable given the expected number of captures per session
 # Satisfied with our prior model, let's now condition on the observed data
-mod1 <- mvgam(formula = y ~ -1,
-              trend_formula = ~ s(trend, bs = 're') + 
-                s(ndvi_ma12, trend, bs = 're') - 1,
-              data = data_train,
-              newdata = data_test,
-              family = poisson(),
-              trend_model = AR(),
-              algorithm = 'sampling',
-              samples = 1600)
+mod1 <- mvgam(
+  formula = y ~ -1,
+  trend_formula = ~ s(trend, bs = 're') + 
+    s(ndvi_ma12, trend, bs = 're') - 1,
+  data = data_train,
+  newdata = data_test,
+  family = poisson(),
+  trend_model = AR(),
+  algorithm = 'sampling',
+  samples = 1600
+)
 
 # View the model summary to ensure the MCMC estimator is adequately exploring 
 # the joint posterior without any obvious hindrances
@@ -66,20 +69,22 @@ save(mod1, file = 'Outputs/mod1.rda')
 # distributed lags of minimum temperature make sense. But we need to ensure the 
 # computation is sound for this more complex model before adding any dynamic trend
 # components
-mod2 <- mvgam(formula = y ~ -1,
-              trend_formula = ~ s(ndvi_ma12, trend, bs = 're') +
-                # Hierarchical distributed lags of minimum temperature
-                te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
-                te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
-                te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
-                te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
-                te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')) - 1,
-              data = data_train,
-              newdata = data_test,
-              family = poisson(),
-              trend_model = AR(),
-              samples = 1600,
-              algorithm = 'sampling')
+mod2 <- mvgam(
+  formula = y ~ -1,
+  trend_formula = ~ s(ndvi_ma12, trend, bs = 're') +
+    # Hierarchical distributed lags of minimum temperature
+    te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')) - 1,
+  data = data_train,
+  newdata = data_test,
+  family = poisson(),
+  trend_model = AR(),
+  samples = 1600,
+  algorithm = 'sampling'
+)
 
 # Ensure the MCMC estimator is adequately exploring the joint 
 # posterior without any obvious hindrances
@@ -113,16 +118,18 @@ exp(opt$x)
 
 # With prior distributions derived, we can construct the mvgam model with a latent
 # VAR1 temporal process
-priors <- get_mvgam_priors(formula = y ~ -1,
-                           trend_formula = ~ s(ndvi_ma12, trend, bs = 're') +
-                             te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
-                             te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
-                             te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
-                             te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
-                             te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')),
-                           data = data_train,
-                           family = poisson(),
-                           trend_model = VAR(cor = TRUE))
+priors <- get_mvgam_priors(
+  formula = y ~ -1,
+  trend_formula = ~ s(ndvi_ma12, trend, bs = 're') +
+    te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')),
+  data = data_train,
+  family = poisson(),
+  trend_model = VAR(cor = TRUE)
+)
 
 # Update the prior for the species-level process model variances, with appropriate upper and 
 # lower bounds. Here we use brms functionality to easily set priors
@@ -134,35 +141,38 @@ priors <- c(priors,
 priors
 
 # Ensure the priors are properly incorporated into the model's Stan code
-code(mvgam(formula = y ~ -1,
-           trend_formula = ~ s(ndvi_ma12, trend, bs = 're') +
-             te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
-             te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
-             te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
-             te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
-             te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')),
-           data = data_train,
-           newdata = data_test,
-           family = poisson(),
-           trend_model = VAR(cor = TRUE),
-           priors = priors,
-           run_model = FALSE))
+code(mvgam(
+  formula = y ~ -1,
+  trend_formula = ~ s(ndvi_ma12, trend, bs = 're') +
+    te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')),
+  data = data_train,
+  newdata = data_test,
+  family = poisson(),
+  trend_model = VAR(cor = TRUE),
+  priors = priors,
+  run_model = FALSE
+))
 
 # Fit the model
-modvar <- mvgam(formula = y ~ -1,
-                trend_formula = ~ s(ndvi_ma12, trend, bs = 're') +
-                  te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')),
-                data = data_train,
-                newdata = data_test,
-                family = poisson(),
-                trend_model = VAR(cor = TRUE),
-                priors = priors,
-                samples = 1600,
-                algorithm = 'sampling')
+modvar <- mvgam(
+  formula = y ~ -1,
+  trend_formula = ~ s(ndvi_ma12, trend, bs = 're') +
+    te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')),
+  data = data_train,
+  newdata = data_test,
+  family = poisson(),
+  trend_model = VAR(cor = TRUE),
+  priors = priors,
+  samples = 1600
+)
 
 # Calculate stability and forecast decomposition metrics; save
 modvar_metrics <- calc_metrics(modvar, data_test, 'GAMVAR')
@@ -180,21 +190,22 @@ save(modvar_all, file = 'Outputs/modvar_all.rda')
 #### Fit Benchmark models ####
 # Same GAM linear predictor as GAM-VAR model, but with independent AR1 trends
 # (in-text referred to as GAM-AR)
-bench1 <- mvgam(formula = y ~ -1,
-                trend_formula = ~
-                  s(ndvi_ma12, trend, bs = 're') +
-                  te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')),
-                data = data_train,
-                newdata = data_test,
-                family = poisson(),
-                trend_model = AR(),
-                samples = 1600,
-                algorithm = 'sampling',
-                priors = priors)
+bench1 <- mvgam(
+  formula = y ~ -1,
+  trend_formula = ~
+    s(ndvi_ma12, trend, bs = 're') +
+    te(mintemp, lag, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')),
+  data = data_train,
+  newdata = data_test,
+  family = poisson(),
+  trend_model = AR(),
+  samples = 1600,
+  priors = priors
+)
 save(bench1, file = 'Outputs/bench1.rda')
 
 bench1_all <- update(bench1,
@@ -206,24 +217,25 @@ save(bench1_all, file = 'Outputs/bench1_all.rda')
 # A slight decrease in complexity again, by removing the hierarchical components
 # in the linear predictor and using no pooling to learn these
 priors <- c(priors, prior(std_normal(), class = b))
-bench1.2 <- mvgam(formula = y ~ -1,
-                trend_formula = ~
-                  ndvi_ma12 * trend +
-                  te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_ol, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_pb, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_pe, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_pf, k = c(3, 4), bs = c('tp', 'cr')) +
-                  te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')),
-                data = data_train,
-                newdata = data_test,
-                family = poisson(),
-                trend_model = AR(),
-                samples = 1600,
-                algorithm = 'sampling',
-                priors = priors)
+bench1.2 <- mvgam(
+  formula = y ~ -1,
+  trend_formula = ~
+    ndvi_ma12 * trend +
+    te(mintemp, lag, by = weights_dm, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_do, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_ol, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_ot, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_pb, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_pe, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_pf, k = c(3, 4), bs = c('tp', 'cr')) +
+    te(mintemp, lag, by = weights_pp, k = c(3, 4), bs = c('tp', 'cr')),
+  data = data_train,
+  newdata = data_test,
+  family = poisson(),
+  trend_model = AR(),
+  samples = 1600,
+  priors = priors
+)
 save(bench1.2, file = 'Outputs/bench1.2.rda')
 
 bench1.2_all <- update(bench1.2,
@@ -238,24 +250,27 @@ save(bench1.2_all, file = 'Outputs/bench1.2_all.rda')
 # this model, so we use a reasonable prior for it
 priors <- c(prior(normal(1.5, 1), class = Intercept),
             prior(beta(10, 10), class = sigma, lb = 0.2, ub = 1))
-bench2_skeleton <- mvgam(formula = y ~ 1,
-                         data = data_train,
-                         newdata = data_test,
-                         family = poisson(),
-                         trend_model = AR(),
-                         priors = priors,
-                         run_model = FALSE)
+bench2_skeleton <- mvgam(
+  formula = y ~ 1,
+  data = data_train,
+  newdata = data_test,
+  family = poisson(),
+  trend_model = AR(),
+  priors = priors,
+  run_model = FALSE
+)
 code(bench2_skeleton)
 
 # Looks good; run the model
-bench2 <- mvgam(formula = y ~ 1,
-                data = data_train,
-                newdata = data_test,
-                family = poisson(),
-                trend_model = AR(),
-                samples = 1600,
-                priors = priors,
-                algorithm = 'sampling')
+bench2 <- mvgam(
+  formula = y ~ 1,
+  data = data_train,
+  newdata = data_test,
+  family = poisson(),
+  trend_model = AR(),
+  samples = 1600,
+  priors = priors
+)
 save(bench2, file = 'Outputs/bench2.rda')
 
 bench2_all <- update(bench2,
@@ -274,7 +289,6 @@ bench1_roll <- lapply(evaluation_seq, function(last_train){
             last_train = last_train,
             fc_horizon = 12,
             stab_metrics = FALSE,
-            algorithm = 'sampling',
             samples = 1600)
 })
 
@@ -284,7 +298,6 @@ bench1.2_roll <- lapply(evaluation_seq, function(last_train){
             last_train = last_train,
             fc_horizon = 12,
             stab_metrics = FALSE,
-            algorithm = 'sampling',
             samples = 1600)
 })
 
@@ -294,7 +307,6 @@ bench2_roll <- lapply(evaluation_seq, function(last_train){
             last_train = last_train,
             fc_horizon = 12,
             stab_metrics = FALSE,
-            algorithm = 'sampling',
             samples = 1600)
 })
 
@@ -306,7 +318,6 @@ modvar_roll <- lapply(evaluation_seq, function(last_train){
             last_train = last_train,
             fc_horizon = 12,
             stab_metrics = TRUE,
-            algorithm = 'sampling',
             samples = 1600)
 })
 save(bench1_roll, bench1.2_roll, bench2_roll, modvar_roll,
