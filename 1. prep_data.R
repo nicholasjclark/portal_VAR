@@ -4,7 +4,6 @@ library(mgcv)
 library(dplyr)
 
 # Load the most recent rodents survey table for control plots
-setwd("C:/Users/Nick/Google Drive/Academic Work Folder/Ecological forecasting/mv_portalcasting/rodent_evaluation_ms")
 rodents_table <- read.csv('data/rodents_data.csv', as.is = TRUE)
 
 # Calculate means and sds of covariates for later unscaled plotting
