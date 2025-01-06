@@ -5,7 +5,7 @@ library(dplyr)
 
 # Load the most recent rodents survey table for control plots
 setwd("C:/Users/Nick/Google Drive/Academic Work Folder/Ecological forecasting/mv_portalcasting/rodent_evaluation_ms")
-rodents_table <- read.csv('data/rodents_data.csv', as.is = T)
+rodents_table <- read.csv('data/rodents_data.csv', as.is = TRUE)
 
 # Calculate means and sds of covariates for later unscaled plotting
 rodents_table %>%
@@ -24,7 +24,7 @@ rodents_table %>%
   dplyr::summarise(ndvi_mean = mean(ndvi, na.rm = TRUE),
                    ndvi_sd = sd(ndvi, na.rm = TRUE)) -> ndvi_stats
 
-# Prep for modelling
+# Prep the data for modelling
 rodents_table %>%
   dplyr::mutate(month = lubridate::month(newmoondate),
                 year = lubridate::year(newmoondate)) %>%
@@ -35,7 +35,7 @@ rodents_table %>%
                 mintemp = as.vector(scale(mintemp)),
                 maxtemp = as.vector(scale(maxtemp))) %>%
   dplyr::mutate(ndvi_ma12 = zoo::rollmean(ndvi, k = 12, align = 'right',
-                                             na.pad = TRUE)) %>%
+                                          na.pad = TRUE)) %>%
   # # Keep the first observation if multiple taken in the same month
   # dplyr::arrange(year, month) %>%
   # dplyr::group_by(month, year) %>%
@@ -45,32 +45,6 @@ rodents_table %>%
   dplyr::select(y, series, month, year, 
                 newmoonnumber, mintemp:ndvi_ma12) %>%
   dplyr::mutate(time = newmoonnumber - (min(newmoonnumber) - 1))-> model_dat
-
-# # Add missing sampling time points
-# model_dat %>%
-#   dplyr::left_join(data.frame(year = lubridate::year(seq(as.Date("1996/1/1"),
-#                                       as.Date(tail(rodents_table$date, 1)), by = "month")),
-#            month = lubridate::month(seq(as.Date("1996/1/1"),
-#                                        as.Date(tail(rodents_table$date, 1)), by = "month")),
-#            time = 1:length(seq(as.Date("1996/1/1"),
-#                                as.Date(tail(rodents_table$date, 1)), by = "month")))) -> model_dat
-# 
-# model_dat %>%
-#   dplyr::full_join(expand.grid(time = min(model_dat$time):max(model_dat$time),
-#                                series = unique(model_dat$series))) %>%
-#   dplyr::ungroup() %>%
-#   dplyr::select(-year, -month) -> model_dat
-# 
-# model_dat %>%
-#   dplyr::left_join(data.frame(year = lubridate::year(seq(as.Date("1996/1/1"),
-#                                                          as.Date(tail(rodents_table$date, 1)), by = "month")),
-#                               month = lubridate::month(seq(as.Date("1996/1/1"),
-#                                                            as.Date(tail(rodents_table$date, 1)), by = "month")),
-#                               time = 1:length(seq(as.Date("1996/1/1"),
-#                                                   as.Date(tail(rodents_table$date, 1)), by = "month")))) -> model_dat
-
-(max(model_dat$time) * length(unique(model_dat$series))) == NROW(model_dat)
-
 
 # Many models will fail if the series of observations is nearly all zeroes. 
 # Remove species with < 33 (out of 330) total unique observations (i.e. captures in at least
@@ -150,12 +124,12 @@ dim(lag)[1] == NROW(model_dat)
 #2. Create remaining moving average / anomaly versions of environmental covariates
 model_dat %>%
   dplyr::left_join(model_dat %>%
-  dplyr::select(time, mintemp, maxtemp, ndvi) %>%
-  dplyr::distinct() %>%
-  dplyr::mutate(mintemp_ma3 = zoo::rollmean(mintemp, k = 3, align = 'right',
-                                            na.pad = TRUE),
-                maxtemp_ma3 = zoo::rollmean(maxtemp, k = 3, align = 'right',
-                                            na.pad = TRUE))) -> model_dat
+                     dplyr::select(time, mintemp, maxtemp, ndvi) %>%
+                     dplyr::distinct() %>%
+                     dplyr::mutate(mintemp_ma3 = zoo::rollmean(mintemp, k = 3, align = 'right',
+                                                               na.pad = TRUE),
+                                   maxtemp_ma3 = zoo::rollmean(maxtemp, k = 3, align = 'right',
+                                                               na.pad = TRUE))) -> model_dat
 
 # As we now have NAs for the first 11 rows of observations for each lag matrix, 
 # as well as NAs for some rows of the moving average covariates,
@@ -167,15 +141,19 @@ model_dat %>%
 # Impute ndvi_ma12
 model_dat %>%
   dplyr::select(-ndvi_ma12) %>%
-  dplyr::left_join(model_dat %>%
-  dplyr::select(time) %>%
-  dplyr::distinct() %>%
-  dplyr::arrange(time) %>%
-  dplyr::bind_cols(data.frame(ndvi_ma12 = approx_gam(model_dat %>%
-                                                       dplyr::select(ndvi_ma12, month, year, time) %>%
-                                                       dplyr::arrange(time) %>%
-                                                       dplyr::distinct() %>%
-                                                       dplyr::mutate(y = ndvi_ma12))))) -> model_dat
+  dplyr::left_join(
+    model_dat %>%
+      dplyr::select(time) %>%
+      dplyr::distinct() %>%
+      dplyr::arrange(time) %>%
+      dplyr::bind_cols(
+        data.frame(ndvi_ma12 = approx_gam(model_dat %>%
+                                            dplyr::select(ndvi_ma12, month, year, time) %>%
+                                            dplyr::arrange(time) %>%
+                                            dplyr::distinct() %>%
+                                            dplyr::mutate(y = ndvi_ma12)))
+      )
+  ) -> model_dat
 
 
 mintemp_df %>%
@@ -289,20 +267,20 @@ jpeg('Figures/total_series.jpg', width = 5, height = 3.25,
      res = 300, units = 'in')
 par(mar=c(2, 2, 1, 1),
     oma = c(0, 1.25, 0, 0))
-  truth <- totals$total
-  plot(1, type = "n", bty = 'L',
-       xaxt = 'n',
-       ylab = '',
-       ylim = range(c(truth), na.rm = TRUE),
-       xlim = c(0, length(c(truth))),
-       xlab = '')
-  axis(1, at = year_times$min_time, labels = year_times$year, cex.axis = 1,
-       tck= -0.025)
-  lines(x = 1:length(truth), y = truth, lwd = 2, col = "#8F2727")
-  title(main = 'Full community (9 included species)', cex.main = 1, line = 0.1,
-        xpd = NA)
-  box(bty = 'l', lwd = 2)
-  title(ylab = 'Total captures', xpd = NA, line = 2.25)
+truth <- totals$total
+plot(1, type = "n", bty = 'L',
+     xaxt = 'n',
+     ylab = '',
+     ylim = range(c(truth), na.rm = TRUE),
+     xlim = c(0, length(c(truth))),
+     xlab = '')
+axis(1, at = year_times$min_time, labels = year_times$year, cex.axis = 1,
+     tck= -0.025)
+lines(x = 1:length(truth), y = truth, lwd = 2, col = "#8F2727")
+title(main = 'Full community (9 included species)', cex.main = 1, line = 0.1,
+      xpd = NA)
+box(bty = 'l', lwd = 2)
+title(ylab = 'Total captures', xpd = NA, line = 2.25)
 dev.off()
 
 
@@ -312,9 +290,9 @@ totals %>%
   summary()
 
 data_all$year[totals %>%
-  dplyr::filter(time < 273) %>%
-  pull(total) %>%
-  which.min()]
+                dplyr::filter(time < 273) %>%
+                pull(total) %>%
+                which.min()]
 
 totals %>%
   dplyr::filter(time >= 273) %>%
