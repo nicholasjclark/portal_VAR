@@ -1,3 +1,4 @@
+# R script originally prepared by Nicholas J Clark (nicholas.j.clark1214@gmail.com)
 #### 1. Prep data for modelling ####
 library(portalcasting)
 library(mgcv)
