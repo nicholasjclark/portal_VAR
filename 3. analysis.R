@@ -1,3 +1,5 @@
+#### R script originally prepared by Nicholas J Clark (nicholas.j.clark1214@gmail.com) ####
+
 #### Analyse candidate models and produce model-based visualisations ####
 library(mvgam)
 library(scoringRules)
