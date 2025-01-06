@@ -1,3 +1,6 @@
+#### R script originally prepared by Nicholas J Clark (nicholas.j.clark1214@gmail.com) ####
+
+#### Dynamic time series modeling and rolling window forecasting ####
 library(dplyr)
 library(cmdstanr)
 library(forecast)
