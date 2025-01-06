@@ -311,13 +311,13 @@ ggsave('figures/PP_unc_prop.jpg',
        units = 'in', width = 7, height = 5)
 
 stab_metrics <- do.call(rbind.data.frame, 
-                                purrr::map(all_metrics, 'stab_metrics')) %>%
+                        purrr::map(all_metrics, 'stab_metrics')) %>%
   dplyr::bind_rows(modvar_metrics$stab_metrics)
 dplyr::glimpse(stab_metrics)
 
 library(ggbeeswarm)
 p1 <- ggplot(stab_metrics, aes(y = reactivity, 
-                         x = as.factor(end_train))) +
+                               x = as.factor(end_train))) +
   ggbeeswarm::geom_quasirandom(shape = 21, size = 0.5, 
                                dodge.width = .9, 
                                color = "black",
@@ -380,7 +380,7 @@ fc_uncertainty_props %>%
                 process == 'Process_error') -> perror_dat
 
 p3 <- ggplot(perror_dat, aes(y = `Proportion of variance`, 
-                         x = as.factor(end_train))) +
+                             x = as.factor(end_train))) +
   ggbeeswarm::geom_quasirandom(shape = 21, size = 0.5, 
                                dodge.width = .9, 
                                color = "black",
@@ -462,7 +462,7 @@ fc_uncertainty_props %>%
   tidyr::pivot_wider(id_cols = c(series, reactivity,
                                  var_returnrate), 
                      names_from = process,
-                      values_from = 'proportion') %>%
+                     values_from = 'proportion') %>%
   # Re-normalize
   dplyr::rowwise() %>%
   dplyr::mutate(sum = sum(Process_error,
@@ -750,7 +750,7 @@ plot_var_cors(object = modvar_all)
 
 # Plot some of the interesting forecast comparisons
 rstan::stan_hist(modvar_all$model_output, c('A[2,4]',
-                                        'A[4,2]'))
+                                            'A[4,2]'))
 jpeg('Figures/DO_PF_trends.jpeg', width = 6.5, height = 6.5,
      res = 300, units = 'in')
 par(mar=c(2.25, 4, 0.5, 1))
@@ -771,13 +771,13 @@ text(x = 65, y = -1.45, labels = expression(italic(Dipodomys~ordii)),
 text(x = 48, y = 1.8, labels = expression(italic(Perognathus~flavus)),
      col = RColorBrewer::brewer.pal(n = 5, 'Blues')[5], cex = 1)
 plot_fc_constrained(cons_fcs, series = 2, newdata = data_test, 
-                   hide_xlabels = TRUE,
-                   ylab = 'Posterior predictions')
+                    hide_xlabels = TRUE,
+                    ylab = 'Posterior predictions')
 time_axis(labels = FALSE)
 plot_fc_constrained(cons_fcs, series = 7, newdata = data_test, 
-                   hide_xlabels = TRUE,
-                   colours = 'blues',
-                   ylab = 'Posterior predictions')
+                    hide_xlabels = TRUE,
+                    colours = 'blues',
+                    ylab = 'Posterior predictions')
 time_axis()
 dev.off()
 
